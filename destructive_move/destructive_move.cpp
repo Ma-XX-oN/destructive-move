@@ -107,7 +107,7 @@ template <typename From, typename To>
 using  fwd_like_t = copy_rp_t<From, copy_cv_t<From, To>>;
 
 template <typename From, typename To>
-auto&& fwd_like(To&& obj_ref)
+decltype(auto) fwd_like(To&& obj_ref)
 {
     return static_cast<fwd_like_t<From, To>>(obj_ref);
 }
@@ -276,7 +276,7 @@ int main()
 {
     destructive_move_container<X> x;
     x->test();
-
+    static_cast<X const&>(x).test();
     std::cout << "Hello World!\n"; 
 }
 
