@@ -7,36 +7,112 @@
 #include <new>
 #include <assert.h>
 
+template <typename...T>
+constexpr bool always_false = false;
+
+namespace detail {
+    template <typename T0, typename T1> struct is_same_cv_impl                                       : std::true_type  {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0               , T1 const         > : std::false_type {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0               , T1       volatile> : std::false_type {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0               , T1 const volatile> : std::false_type {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0 const         , T1               > : std::false_type {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0 const         , T1 const         > : std::true_type  {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0 const         , T1       volatile> : std::false_type {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0 const         , T1 const volatile> : std::false_type {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0       volatile, T1               > : std::false_type {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0       volatile, T1 const         > : std::false_type {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0       volatile, T1       volatile> : std::true_type  {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0       volatile, T1 const volatile> : std::false_type {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0 const volatile, T1               > : std::false_type {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0 const volatile, T1 const         > : std::false_type {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0 const volatile, T1       volatile> : std::false_type {};
+    template <typename T0, typename T1> struct is_same_cv_impl<T0 const volatile, T1 const volatile> : std::true_type  {};
+}
+
+template <typename T0, typename T1>
+constexpr bool is_same_cv_v = detail::is_same_cv_impl<
+    std::remove_pointer_t<std::remove_reference_t<T0>>
+    , std::remove_pointer_t<std::remove_reference_t<T1>>
+>::value;
+
+//-----------------------------------------------------------------------------
+
+namespace detail {
+    template <typename T0, typename T1> struct is_stronger_cv_impl                                       : std::false_type {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0               , T1 const         > : std::false_type {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0               , T1       volatile> : std::false_type {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0               , T1 const volatile> : std::false_type {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0 const         , T1               > : std::true_type  {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0 const         , T1 const         > : std::false_type {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0 const         , T1       volatile> : std::false_type {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0 const         , T1 const volatile> : std::false_type {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0       volatile, T1               > : std::true_type  {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0       volatile, T1 const         > : std::false_type {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0       volatile, T1       volatile> : std::false_type {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0       volatile, T1 const volatile> : std::false_type {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0 const volatile, T1               > : std::true_type  {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0 const volatile, T1 const         > : std::true_type  {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0 const volatile, T1       volatile> : std::true_type  {};
+    template <typename T0, typename T1> struct is_stronger_cv_impl<T0 const volatile, T1 const volatile> : std::false_type {};
+}
+
+template <typename T0, typename T1>
+constexpr bool is_stronger_cv_v = detail::is_stronger_cv_impl<
+    std::remove_pointer_t<std::remove_reference_t<T0>>
+    , std::remove_pointer_t<std::remove_reference_t<T1>>
+>::value;
+
+// This is the function you most likely want.
+template <typename T0, typename T1>
+constexpr bool is_stronger_or_same_cv_v = is_stronger_cv_v<T0, T1> || is_same_cv_v<T0, T1>;
+
 // Should prolly get rid of array and all pointers?  Should I get rid of pointers?  Dunno...
 template <typename T>
 using bare_t = std::remove_pointer_t<std::remove_cv_t<std::remove_reference_t<T>>>;
 
-template <typename T, typename U> struct fwd_cv_impl                      { using type = U               ; };
-template <typename T, typename U> struct fwd_cv_impl<T       volatile, U> { using type = U       volatile; };
-template <typename T, typename U> struct fwd_cv_impl<T const         , U> { using type = U const         ; };
-template <typename T, typename U> struct fwd_cv_impl<T const volatile, U> { using type = U const volatile; };
+//=============================================================================
+namespace detail {
+    template <typename From, typename To> struct copy_rp               { using type = std::remove_reference_t<To>    ; };
+    template <typename From, typename To> struct copy_rp<From &  , To> { using type = std::remove_reference_t<To> &  ; };
+    template <typename From, typename To> struct copy_rp<From && , To> { using type = std::remove_reference_t<To> && ; };
+    template <typename From, typename To> struct copy_rp<From *  , To> { using type = std::remove_reference_t<To> *  ; };
+    template <typename From, typename To> struct copy_rp<From *& , To> { using type = std::remove_reference_t<To> *& ; };
+    template <typename From, typename To> struct copy_rp<From *&&, To> { using type = std::remove_reference_t<To> *&&; };
+}
+// Copies reference/pointer type from From to To
+template <typename From, typename To> using  copy_rp_t = typename detail::copy_rp<From, To>::type;
 
-template <typename T, typename U>
-using fwd_cv_t = typename fwd_cv_impl<std::remove_reference_t<T>, bare_t<U>>::type;
+//=============================================================================
+namespace detail {
+    template <typename From, typename To> struct copy_cv                          { using type = To                ; };
+    template <typename From, typename To> struct copy_cv<From const         , To> { using type = To  const         ; };
+    template <typename From, typename To> struct copy_cv<From       volatile, To> { using type = To        volatile; };
+    template <typename From, typename To> struct copy_cv<From const volatile, To> { using type = To  const volatile; };
+}
+// Copies const/volatile from From to To.
+//
+// Any reference is first removed from From.
+template <typename From, typename To> using  copy_cv_t
+= copy_rp_t<To, typename detail::copy_cv<std::remove_reference_t<From>, std::remove_pointer_t<std::remove_reference_t<To>>>::type>;
 
-template <typename T, typename U> struct fwd_ref_impl         { using type = U  ; };
-template <typename T, typename U> struct fwd_ref_impl<T& , U> { using type = U& ; };
-template <typename T, typename U> struct fwd_ref_impl<T&&, U> { using type = U&&; };
+//=============================================================================
+// Remove reference, first level pointer and any cv qualifiers.
+template <typename T>
+using  strip_t = std::remove_cv_t<std::remove_pointer_t<std::remove_reference_t<T>>>;
 
-template <typename T, typename U>
-using fwd_ref_t = typename fwd_ref_impl<T, std::remove_reference_t<U>>::type;
+//=============================================================================
+// Used for std::forward to take a type From and copy its cv and rp over to
+// type To.
+template <typename From, typename To>
+using  fwd_like_t = copy_rp_t<From, copy_cv_t<From, To>>;
 
-template <typename T, typename U>
-using fwd_like_t = fwd_ref_t<T, fwd_cv_t<T, U>>;
+template <typename From, typename To>
+auto&& fwd_like(To&& obj_ref)
+{
+    return static_cast<fwd_like_t<From, To>>(obj_ref);
+}
 
 static_assert(std::is_same_v<fwd_like_t<int const&&, float&>, float const&&>, "");
-
-template <typename T, typename U>
-U&& fwd_like(T&& to_forward)
-{
-    //static_assert(std::is_same<T, nullptr_t>::value, "");
-    return std::forward<fwd_like_t<T, U>>(to_forward);
-}
 
 template <typename T>
 class destructive_move_container
@@ -45,10 +121,14 @@ class destructive_move_container
     char m_storage[sizeof(T)];
 
     template <typename U>
-    static T&& object(U&& this_ref) noexcept
+    static auto&& object(U&& this_ref) noexcept
     {
         assert(this_ref.m_isValid);
-        return fwd_like<U, T>(*reinterpret_cast<fwd_cv_t<U, T>*>(this_ref.m_storage));
+        return fwd_like<U>(
+            reinterpret_cast<copy_cv_t<U, T>&>(
+                *this_ref.m_storage
+            )
+        );
     }
 
 public:
@@ -105,25 +185,77 @@ public:
     T const volatile* operator& () const volatile noexcept { return &object(); }
 
     // Conversion operators
-             operator T                &&() && noexcept { return                  object() ; }
-             operator T       volatile &&() && noexcept { return                  object() ; }
-             operator T const          &&() && noexcept { return                  object() ; }
-             operator T const volatile &&() && noexcept { return                  object() ; }
+    //
+    // NOTE: Only implicit conversion casts to weaker types and base
+    //       classes with the same reference type are allowed.  However,
+    //       becasue keyword "this" cannot be interrogated external to the
+    //       body of the function, each function has to be manually writen.
+    //
+    //                     | downcast   | is_stronger_or_same  ||           
+    //    lrvalue transfer | or upcast  | <T, decltype(*this)> || Cast is   
+    //   ==================+============+======================++===========
+    //     T&& from &&     | downcast   | true                 ||  implicit 
+    //     T&  from &      | downcast   | true                 ||  implicit 
+    //     T&& from &&     | upcast     | true                 ||  explicit  // This will not throw. Use
+    //     T&  from &      | upcast     | true                 ||  explicit  // polymorph_dynamic_cast for that.
+    //   ------------------+------------+----------------------++-----------
+    //     T&& from &&     | don't care | false                ||  explicit 
+    //     T&  from &      | don't care | false                ||  explicit 
+    //   ------------------+------------+----------------------++-----------
+    //     T&& from &      | don't care | don't care           ||  explicit 
+    //     T&  from &&     | don't care | don't care           ||  explicit 
+    //
+    // There is no exception when downcasting, hence noexcept(IS_DOWNCAST).
+    //
+    // There will be 4 functions (no cv, c, v, and cv) for each line in the
+    // chart except.  That's 4*8 = 32 functions.  That's a lot of code,
+    // with a lot of potential for error.  Because the main body does
+    // exactly the same thing (and also happens to be very simple as they
+    // just hand off to other functions), using a macro is the safest and
+    // clearest way to do this.
+    //
+    // If what type of "this" could be deduced, with all its qualifiers,
+    // then this would colapse to two functions, or a single function if
+    // template <typename U> operator U&&() was a universal reference
+    // conversion function. 
 
-             operator T                & () &  noexcept { return                  object() ; }
-             operator T       volatile & () &  noexcept { return                  object() ; }
-             operator T const          & () &  noexcept { return                  object() ; }
-             operator T const volatile & () &  noexcept { return                  object() ; }
+#define IS_DOWNCAST (std::is_base_of<bare_t<U>, T>::value)
+#define IS_UPCAST   (std::is_base_of<T, bare_t<U>>::value)
+// Using ... instead of a named parameter because when enabler(const_volatile) is called with
+// const_volatile being blank (no cv), VC++ complains.
+#define IS_CV_STRONGER_OR_SAME(...) (is_stronger_or_same_cv_v<U, int __VA_ARGS__>)
+#define IS_ALWAYS_ENABLED(...)      (!always_false<U>)
 
-    explicit operator T                &&() &  noexcept { return object(std::move(*this)); }
-    explicit operator T       volatile &&() &  noexcept { return object(std::move(*this)); }
-    explicit operator T const          &&() &  noexcept { return object(std::move(*this)); }
-    explicit operator T const volatile &&() &  noexcept { return object(std::move(*this)); }
+#define CONVERSION(const_volatile, convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
+        template <typename U, std::enable_if_t< enabler(const_volatile) , int> = 0>             \
+        explicit operator U convert_to_lrvalue () const_volatile convert_from_lrvalue noexcept  \
+        {                                                                                       \
+            return fwd_like<U>(object());                                                       \
+        }
 
-    explicit operator T                & () && noexcept { return object(); }
-    explicit operator T       volatile & () && noexcept { return object(); }
-    explicit operator T const          & () && noexcept { return object(); }
-    explicit operator T const volatile & () && noexcept { return object(); }
+#define CONVERSION_ALL_CVS(        convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
+        CONVERSION(              , convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
+        CONVERSION(      volatile, convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
+        CONVERSION(const         , convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
+        CONVERSION(const volatile, convert_to_lrvalue, convert_from_lrvalue, enabler, explicit)
+
+    CONVERSION_ALL_CVS(&&, &&,  IS_DOWNCAST && IS_CV_STRONGER_OR_SAME,         );
+    CONVERSION_ALL_CVS(& , & ,  IS_DOWNCAST && IS_CV_STRONGER_OR_SAME,         );
+    CONVERSION_ALL_CVS(&&, &&,  IS_UPCAST   && IS_CV_STRONGER_OR_SAME, explicit);
+    CONVERSION_ALL_CVS(& , & ,  IS_UPCAST   && IS_CV_STRONGER_OR_SAME, explicit);
+
+    CONVERSION_ALL_CVS(&&, &&,                !IS_CV_STRONGER_OR_SAME, explicit);
+    CONVERSION_ALL_CVS(& , & ,                !IS_CV_STRONGER_OR_SAME, explicit);
+
+    CONVERSION_ALL_CVS(&&, & ,                      IS_ALWAYS_ENABLED, explicit);
+    CONVERSION_ALL_CVS(& , &&,                      IS_ALWAYS_ENABLED, explicit);
+
+#undef CONVERSION_ALL_CVS
+#undef CONVERSION
+#undef IS_ALWAYS_ENABLED
+#undef IS_CV_STRONGER_OR_SAME
+#undef IS_UPCAST
+#undef IS_DOWNCAST
 };
 
 struct X {
@@ -143,6 +275,7 @@ struct X {
 int main()
 {
     destructive_move_container<X> x;
+    x->test();
 
     std::cout << "Hello World!\n"; 
 }
