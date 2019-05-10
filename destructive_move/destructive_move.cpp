@@ -107,7 +107,7 @@ template <typename From, typename To>
 using  fwd_like_t = copy_rp_t<From, copy_cv_t<From, To>>;
 
 template <typename From, typename To>
-decltype(auto) fwd_like(To&& obj_ref)
+auto&& fwd_like(To&& obj_ref)
 {
     return static_cast<fwd_like_t<From, To>>(obj_ref);
 }
@@ -161,16 +161,16 @@ public:
     bool is_valid() const { return m_isValid; }
 
     // Access object as lvalue reference
-    T&  object()                &  noexcept { return object(          *this ); }
-    T&  object()       volatile &  noexcept { return object(          *this ); }
-    T&  object() const          &  noexcept { return object(          *this ); }
-    T&  object() const volatile &  noexcept { return object(          *this ); }
+    auto&& object()                &  noexcept { return object(          *this ); }
+    auto&& object()       volatile &  noexcept { return object(          *this ); }
+    auto&& object() const          &  noexcept { return object(          *this ); }
+    auto&& object() const volatile &  noexcept { return object(          *this ); }
 
     // Access object as rvalue reference
-    T&& object()                && noexcept { return object(std::move(*this)); }
-    T&& object()       volatile && noexcept { return object(std::move(*this)); }
-    T&& object() const          && noexcept { return object(std::move(*this)); }
-    T&& object() const volatile && noexcept { return object(std::move(*this)); }
+    auto&& object()                && noexcept { return object(std::move(*this)); }
+    auto&& object()       volatile && noexcept { return object(std::move(*this)); }
+    auto&& object() const          && noexcept { return object(std::move(*this)); }
+    auto&& object() const volatile && noexcept { return object(std::move(*this)); }
 
     // Member of operators
     T               * operator->()                noexcept { return &object(); }
@@ -220,7 +220,7 @@ public:
     // conversion function. 
 
 #define IS_DOWNCAST (std::is_base_of<bare_t<U>, T>::value)
-#define IS_UPCAST   (std::is_base_of<T, bare_t<U>>::value)
+#define IS_UPCAST   (std::is_base_of<T, bare_t<U>>::value && !std::is_same<T, bare_t<U>>::value)
 // Using ... instead of a named parameter because when enabler(const_volatile) is called with
 // const_volatile being blank (no cv), VC++ complains.
 #define IS_CV_STRONGER_OR_SAME(...) (is_stronger_or_same_cv_v<U, int __VA_ARGS__>)
