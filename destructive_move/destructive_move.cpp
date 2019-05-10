@@ -10,6 +10,7 @@
 template <typename...T>
 constexpr bool always_false = false;
 
+//=============================================================================
 namespace detail {
     template <typename T0, typename T1> struct is_same_cv_impl                                       : std::true_type  {};
     template <typename T0, typename T1> struct is_same_cv_impl<T0               , T1 const         > : std::false_type {};
@@ -66,10 +67,6 @@ constexpr bool is_stronger_cv_v = detail::is_stronger_cv_impl<
 template <typename T0, typename T1>
 constexpr bool is_stronger_or_same_cv_v = is_stronger_cv_v<T0, T1> || is_same_cv_v<T0, T1>;
 
-// Should prolly get rid of array and all pointers?  Should I get rid of pointers?  Dunno...
-template <typename T>
-using bare_t = std::remove_pointer_t<std::remove_cv_t<std::remove_reference_t<T>>>;
-
 //=============================================================================
 namespace detail {
     template <typename From, typename To> struct copy_rp               { using type = std::remove_reference_t<To>    ; };
@@ -97,6 +94,7 @@ template <typename From, typename To> using  copy_cv_t
 
 //=============================================================================
 // Remove reference, first level pointer and any cv qualifiers.
+// Should prolly get rid of array and all pointers?  Should I get rid of pointers?  Dunno...
 template <typename T>
 using  strip_t = std::remove_cv_t<std::remove_pointer_t<std::remove_reference_t<T>>>;
 
@@ -111,6 +109,38 @@ auto&& fwd_like(To&& obj_ref)
 {
     return static_cast<fwd_like_t<From, To>>(obj_ref);
 }
+
+//=============================================================================
+namespace detail {
+    template <typename T> struct to_const_impl      { using type = T const & ; };
+    template <typename T> struct to_const_impl<T&&> { using type = T const &&; };
+    template <typename T> struct to_const_impl<T* > { using type = T const * ; };
+}
+template <typename T>     using  to_const = typename detail::to_const_impl<T>::type;
+
+//=============================================================================
+namespace detail {
+    template <typename T> struct to_const_rvalue_impl      { using type = T; };
+    template <typename T> struct to_const_rvalue_impl<T&&> { using type = T const&&; };
+}
+template <typename T>     using  to_const_rvalue = typename detail::to_const_rvalue_impl<T>::type;
+
+//=============================================================================
+namespace detail {
+    template <typename T> struct to_non_const_impl            { using type = T & ; };
+    template <typename T> struct to_non_const_impl<T      &&> { using type = T &&; };
+    template <typename T> struct to_non_const_impl<T const& > { using type = T & ; };
+    template <typename T> struct to_non_const_impl<T const&&> { using type = T &&; };
+    template <typename T> struct to_non_const_impl<T const* > { using type = T * ; };
+}
+template <typename T>     using  to_non_const = typename detail::to_non_const_impl<T>::type;
+
+//=============================================================================
+template <template <typename> class Op, typename T>
+auto&& cast(T&& item) {
+    return std::forward<fwd_type_t<T, Op<T>>>(const_cast<strip_t<T>&>(item));
+}
+
 
 static_assert(std::is_same_v<fwd_like_t<int const&&, float&>, float const&&>, "");
 
@@ -219,8 +249,8 @@ public:
     // template <typename U> operator U&&() was a universal reference
     // conversion function. 
 
-#define IS_DOWNCAST (std::is_base_of<bare_t<U>, T>::value)
-#define IS_UPCAST   (std::is_base_of<T, bare_t<U>>::value && !std::is_same<T, bare_t<U>>::value)
+#define IS_DOWNCAST (std::is_base_of<strip_t<U>, T>::value)
+#define IS_UPCAST   (std::is_base_of<T, strip_t<U>>::value && !std::is_same<T, strip_t<U>>::value)
 // Using ... instead of a named parameter because when enabler(const_volatile) is called with
 // const_volatile being blank (no cv), VC++ complains.
 #define IS_CV_STRONGER_OR_SAME(...) (is_stronger_or_same_cv_v<U, int __VA_ARGS__>)
