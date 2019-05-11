@@ -102,10 +102,10 @@ using  strip_t = std::remove_cv_t<std::remove_pointer_t<std::remove_reference_t<
 // Used for std::forward to take a type From and copy its cv and rp over to
 // type To.
 template <typename From, typename To>
-using  fwd_like_t = copy_rp_t<From, copy_cv_t<From, To>>;
+using  fwd_like_t = copy_rp_t<std::conditional_t<std::is_lvalue_reference_v<From>, From, From&&>, copy_cv_t<From, To>>;
 
 template <typename From, typename To>
-auto&& fwd_like(To&& obj_ref)
+decltype(auto) fwd_like(To&& obj_ref)
 {
     return static_cast<fwd_like_t<From, To>>(obj_ref);
 }
@@ -138,11 +138,11 @@ template <typename T>     using  to_non_const = typename detail::to_non_const_im
 //=============================================================================
 template <template <typename> class Op, typename T>
 auto&& cast(T&& item) {
-    return std::forward<fwd_type_t<T, Op<T>>>(const_cast<strip_t<T>&>(item));
+    return std::forward<fwd_like_t<T, Op<T>>>(const_cast<strip_t<T>&>(item));
 }
 
 
-static_assert(std::is_same_v<fwd_like_t<int const&&, float&>, float const&&>, "");
+static_assert(std::is_same_v<fwd_like_t<int const, float&>, float const&&>, "");
 
 template <typename T>
 class destructive_move_container
@@ -259,8 +259,8 @@ public:
 #define CONVERSION(const_volatile, convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
         template <typename U, std::enable_if_t< enabler(const_volatile) , int> = 0>             \
         explicit operator U convert_to_lrvalue () const_volatile convert_from_lrvalue noexcept  \
-        {                                                                                       \
-            return fwd_like<U>(object());                                                       \
+        {  \
+            return fwd_like<U convert_to_lrvalue>(object());                                                       \
         }
 
 #define CONVERSION_ALL_CVS(        convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
@@ -306,9 +306,13 @@ int main()
 {
     destructive_move_container<X> x;
     x->test();
-    static_cast<X const&>(x).test();
+    static_cast<X volatile const&>(x).test();
     std::cout << "Hello World!\n"; 
 }
+
+//To automatically close the console when debugging stops, enable Tools->Options->Debugging->Automatically close the console when debugging stops.
+//  clang -std=c++17 -Wall -Xclang -flto-visibility-public-std destructive_move.cpp
+
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu
 // Debug program: F5 or Debug > Start Debugging menu
