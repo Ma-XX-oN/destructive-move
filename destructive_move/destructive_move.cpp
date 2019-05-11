@@ -177,7 +177,7 @@ public:
     }
 
     template <typename...Ts>
-    void construct(Ts&...args) {
+    void construct(Ts&&...args) {
         assert(!m_isValid);
         new (m_storage) T(std::forward<Ts>(args)...);
         m_isValid = true;
@@ -203,16 +203,16 @@ public:
     auto&& object() const volatile && noexcept { return object(std::move(*this)); }
 
     // Member of operators
-    T               * operator->()                noexcept { return &object(); }
-    T       volatile* operator->()       volatile noexcept { return &object(); }
-    T const         * operator->() const          noexcept { return &object(); }
-    T const volatile* operator->() const volatile noexcept { return &object(); }
+    auto operator->()                noexcept { return &object(); }
+    auto operator->()       volatile noexcept { return &object(); }
+    auto operator->() const          noexcept { return &object(); }
+    auto operator->() const volatile noexcept { return &object(); }
 
     // Address of operators
-    T               * operator& ()                noexcept { return &object(); }
-    T       volatile* operator& ()       volatile noexcept { return &object(); }
-    T const         * operator& () const          noexcept { return &object(); }
-    T const volatile* operator& () const volatile noexcept { return &object(); }
+    auto operator& ()                noexcept { return &object(); }
+    auto operator& ()       volatile noexcept { return &object(); }
+    auto operator& () const          noexcept { return &object(); }
+    auto operator& () const volatile noexcept { return &object(); }
 
     // Conversion operators
     //
@@ -305,8 +305,33 @@ struct X {
 int main()
 {
     destructive_move_container<X> x;
+    std::cout << "\nlvalues\n";
     x->test();
-    static_cast<X volatile const&>(x).test();
+
+    std::cout << "\nlvalues\n";
+    static_cast<X                & >(x).test();
+    static_cast<X       volatile & >(x).test();
+    static_cast<X const          & >(x).test();
+    static_cast<X const volatile & >(x).test();
+
+    std::cout << "\nrvalues\n";
+    static_cast<X                &&>(x).test();
+    static_cast<X       volatile &&>(x).test();
+    static_cast<X const          &&>(x).test();
+    static_cast<X const volatile &&>(x).test();
+
+    std::cout << "\nlvalues\n";
+    static_cast<destructive_move_container<X>                & >(x)->test();
+    static_cast<destructive_move_container<X>       volatile & >(x)->test();
+    static_cast<destructive_move_container<X> const          & >(x)->test();
+    static_cast<destructive_move_container<X> const volatile & >(x)->test();
+
+    std::cout << "\nlvalues\n";
+    static_cast<destructive_move_container<X>                &&>(x)->test();
+    static_cast<destructive_move_container<X>       volatile &&>(x)->test();
+    static_cast<destructive_move_container<X> const          &&>(x)->test();
+    static_cast<destructive_move_container<X> const volatile &&>(x)->test();
+
     std::cout << "Hello World!\n"; 
 }
 
