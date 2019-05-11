@@ -167,7 +167,7 @@ class destructive_move_container<T, void>
     : public destructive_move_container_impl<T, destructive_move_container<T, void>>
 {
     using base = destructive_move_container_impl<T, destructive_move_container<T, void>>;
-    bool m_isValid = false;
+    bool m_isValid;
 public:
     void is_valid(bool value)                {        m_isValid = value; }
     void is_valid(bool value)       volatile {        m_isValid = value; }
@@ -203,6 +203,9 @@ public:
     template <typename...Ts>
     destructive_move_container_impl(Ts&&...args)
     {
+        // Due to using the CRTP, need to init is_valid in base class.  Might
+        // have some performance impact is using external flag.
+        is_valid(false);
         construct(std::forward<Ts>(args)...);
     }
 
