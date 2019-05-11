@@ -144,159 +144,53 @@ auto&& cast(T&& item) {
 
 static_assert(std::is_same_v<fwd_like_t<int const, float&>, float const&&>, "");
 
+// TODO: Will need copy/move constructor/assigment operators
+template <typename T, typename Derived>
+class destructive_move_container_impl;
+
 template <typename T, typename Is_valid = void>
 class destructive_move_container
+    : public destructive_move_container_impl<T, destructive_move_container<T, Is_valid>>
 {
-    char m_storage[sizeof(T)];
-
-    template <typename U>
-    static auto&& object(U&& this_ref) noexcept
-    {
-        assert(Is_valid(std::addressof(this_ref)));
-        return fwd_like<U>(
-            reinterpret_cast<copy_cv_t<U, T>&>(
-                *this_ref.m_storage
-            )
-        );
-    }
-
+    using base = destructive_move_container_impl<T, destructive_move_container<T, Is_valid>>;
 public:
+    void is_valid(bool value)                {        Is_valid(this, value); }
+    void is_valid(bool value)       volatile {        Is_valid(this, value); }
+    bool is_valid(          ) const          { return Is_valid(this); }
+    bool is_valid(          ) const volatile { return Is_valid(this); }
 
-    template <typename...Ts>
-    destructive_move_container(Ts&&...args)
-    {
-        construct(std::forward<Ts>(args)...);
-    }
-
-    ~destructive_move_container()
-    {
-        if (Is_valid(this)) {
-            object().~T();
-        }
-    }
-
-    template <typename...Ts>
-    void construct(Ts&&...args) {
-        assert(!Is_valid(this));
-        new (m_storage) T(std::forward<Ts>(args)...);
-        Is_valid(this, true);
-    }
-
-    void destruct() {
-        Is_valid(this, false);
-        object().~destructive_move_container();
-    }
-
-    bool is_valid() const { return Is_valid(this); }
-
-    // Access object as lvalue reference
-    auto&& object()                &  noexcept { return object(          *this ); }
-    auto&& object()       volatile &  noexcept { return object(          *this ); }
-    auto&& object() const          &  noexcept { return object(          *this ); }
-    auto&& object() const volatile &  noexcept { return object(          *this ); }
-
-    // Access object as rvalue reference
-    auto&& object()                && noexcept { return object(std::move(*this)); }
-    auto&& object()       volatile && noexcept { return object(std::move(*this)); }
-    auto&& object() const          && noexcept { return object(std::move(*this)); }
-    auto&& object() const volatile && noexcept { return object(std::move(*this)); }
-
-    // Member of operators
-    auto operator->()                noexcept { return &object(); }
-    auto operator->()       volatile noexcept { return &object(); }
-    auto operator->() const          noexcept { return &object(); }
-    auto operator->() const volatile noexcept { return &object(); }
-
-    // Address of operators
-    auto operator& ()                noexcept { return &object(); }
-    auto operator& ()       volatile noexcept { return &object(); }
-    auto operator& () const          noexcept { return &object(); }
-    auto operator& () const volatile noexcept { return &object(); }
-
-    // Conversion operators
-    //
-    // NOTE: Only implicit conversion casts to weaker types and base
-    //       classes with the same reference type are allowed.  However,
-    //       becasue keyword "this" cannot be interrogated external to the
-    //       body of the function, each function has to be manually writen.
-    //
-    //                     | downcast   | is_stronger_or_same  ||           
-    //    lrvalue transfer | or upcast  | <T, decltype(*this)> || Cast is   
-    //   ==================+============+======================++===========
-    //     T&& from &&     | downcast   | true                 ||  implicit 
-    //     T&  from &      | downcast   | true                 ||  implicit 
-    //     T&& from &&     | upcast     | true                 ||  explicit  // This will not throw. Use
-    //     T&  from &      | upcast     | true                 ||  explicit  // polymorph_dynamic_cast for that.
-    //   ------------------+------------+----------------------++-----------
-    //     T&& from &&     | don't care | false                ||  explicit 
-    //     T&  from &      | don't care | false                ||  explicit 
-    //   ------------------+------------+----------------------++-----------
-    //     T&& from &      | don't care | don't care           ||  explicit 
-    //     T&  from &&     | don't care | don't care           ||  explicit 
-    //
-    // There is no exception when downcasting, hence noexcept(IS_DOWNCAST).
-    //
-    // There will be 4 functions (no cv, c, v, and cv) for each line in the
-    // chart except.  That's 4*8 = 32 functions.  That's a lot of code,
-    // with a lot of potential for error.  Because the main body does
-    // exactly the same thing (and also happens to be very simple as they
-    // just hand off to other functions), using a macro is the safest and
-    // clearest way to do this.
-    //
-    // If what type of "this" could be deduced, with all its qualifiers,
-    // then this would colapse to two functions, or a single function if
-    // template <typename U> operator U&&() was a universal reference
-    // conversion function. 
-
-#define IS_DOWNCAST (std::is_base_of<strip_t<U>, T>::value)
-#define IS_UPCAST   (std::is_base_of<T, strip_t<U>>::value && !std::is_same<T, strip_t<U>>::value)
-// Using ... instead of a named parameter because when enabler(const_volatile) is called with
-// const_volatile being blank (no cv), VC++ complains.
-#define IS_CV_STRONGER_OR_SAME(...) (is_stronger_or_same_cv_v<U, int __VA_ARGS__>)
-#define IS_ALWAYS_ENABLED(...)      (!always_false<U>)
-
-#define CONVERSION(const_volatile, convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
-        template <typename U, std::enable_if_t< enabler(const_volatile) , int> = 0>             \
-        explicit operator U convert_to_lrvalue () const_volatile convert_from_lrvalue noexcept  \
-        {                                                                                       \
-            return fwd_like<U convert_to_lrvalue>(object());                                    \
-        }
-
-#define CONVERSION_ALL_CVS(        convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
-        CONVERSION(              , convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
-        CONVERSION(      volatile, convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
-        CONVERSION(const         , convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
-        CONVERSION(const volatile, convert_to_lrvalue, convert_from_lrvalue, enabler, explicit)
-
-    CONVERSION_ALL_CVS(&&, &&,  IS_DOWNCAST && IS_CV_STRONGER_OR_SAME,         );
-    CONVERSION_ALL_CVS(& , & ,  IS_DOWNCAST && IS_CV_STRONGER_OR_SAME,         );
-    CONVERSION_ALL_CVS(&&, &&,  IS_UPCAST   && IS_CV_STRONGER_OR_SAME, explicit);
-    CONVERSION_ALL_CVS(& , & ,  IS_UPCAST   && IS_CV_STRONGER_OR_SAME, explicit);
-
-    CONVERSION_ALL_CVS(&&, &&,                !IS_CV_STRONGER_OR_SAME, explicit);
-    CONVERSION_ALL_CVS(& , & ,                !IS_CV_STRONGER_OR_SAME, explicit);
-
-    CONVERSION_ALL_CVS(&&, & ,                      IS_ALWAYS_ENABLED, explicit);
-    CONVERSION_ALL_CVS(& , &&,                      IS_ALWAYS_ENABLED, explicit);
-
-#undef CONVERSION_ALL_CVS
-#undef CONVERSION
-#undef IS_ALWAYS_ENABLED
-#undef IS_CV_STRONGER_OR_SAME
-#undef IS_UPCAST
-#undef IS_DOWNCAST
+    using base::base;
 };
 
 template <typename T>
 class destructive_move_container<T, void>
+    : public destructive_move_container_impl<T, destructive_move_container<T, void>>
 {
+    using base = destructive_move_container_impl<T, destructive_move_container<T, void>>;
     bool m_isValid = false;
+public:
+    void is_valid(bool value)                {        m_isValid = value; }
+    void is_valid(bool value)       volatile {        m_isValid = value; }
+    bool is_valid(          ) const          { return m_isValid; }
+    bool is_valid(          ) const volatile { return m_isValid; }
+
+    using base::base;
+};
+
+template <typename T, typename Derived>
+class destructive_move_container_impl
+{
+    Derived                * derived()                { return static_cast<Derived                *>(this); }
+    Derived       volatile * derived()       volatile { return static_cast<Derived       volatile *>(this); }
+    Derived const          * derived() const          { return static_cast<Derived const          *>(this); }
+    Derived const volatile * derived() const volatile { return static_cast<Derived const volatile *>(this); }
+
     char m_storage[sizeof(T)];
 
     template <typename U>
     static auto&& object(U&& this_ref) noexcept
     {
-        assert(this_ref.m_isValid);
+        assert(this_ref.is_valid());
         return fwd_like<U>(
             reinterpret_cast<copy_cv_t<U, T>&>(
                 *this_ref.m_storage
@@ -307,31 +201,35 @@ class destructive_move_container<T, void>
 public:
 
     template <typename...Ts>
-    destructive_move_container(Ts&&...args)
+    destructive_move_container_impl(Ts&&...args)
     {
         construct(std::forward<Ts>(args)...);
     }
 
-    ~destructive_move_container()
+    ~destructive_move_container_impl()
     {
-        if (m_isValid) {
+        if (is_valid()) {
             object().~T();
         }
     }
 
     template <typename...Ts>
     void construct(Ts&&...args) {
-        assert(!m_isValid);
+        assert(!is_valid());
         new (m_storage) T(std::forward<Ts>(args)...);
-        m_isValid = true;
+        is_valid(true);
     }
 
     void destruct() {
-        m_isValid = false;
+        is_valid(false);
         object().~destructive_move_container();
     }
 
-    bool is_valid() const { return m_isValid; }
+    void is_valid(bool value)                {        derived()->is_valid(value); }
+    void is_valid(bool value)       volatile {        derived()->is_valid(value); }
+    bool is_valid(          ) const          { return derived()->is_valid(); }
+    bool is_valid(          ) const volatile { return derived()->is_valid(); }
+
 
     // Access object as lvalue reference
     auto&& object()                &  noexcept { return object(          *this ); }
