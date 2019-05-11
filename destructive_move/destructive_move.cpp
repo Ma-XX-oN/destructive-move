@@ -5,8 +5,23 @@
 #include <utility>
 #include <type_traits>
 #include <new>
+#include <tuple>
 #include <assert.h>
 
+#ifdef _MSC_VER
+# define FUNCSIG __FUNCSIG__
+# define NO_VTABLE __declspec(novtable)
+# ifndef _CPPRTTI
+#  error Must have RTTI on
+# endif
+#else
+# define FUNCSIG __PRETTY_FUNCTION__
+# define NO_VTABLE 
+#endif
+
+#define OUTPUT_FUNC (std::cout << (void*)this << " " << FUNCSIG << "\n")
+
+//=============================================================================
 template <typename...T>
 constexpr bool always_false = false;
 
@@ -102,15 +117,16 @@ using  strip_t = std::remove_cv_t<std::remove_pointer_t<std::remove_reference_t<
 // Used for std::forward to take a type From and copy its cv and rp over to
 // type To.
 template <typename From, typename To>
-using  fwd_like_t = copy_rp_t<std::conditional_t<std::is_lvalue_reference_v<From>, From, From&&>, copy_cv_t<From, To>>;
+using  fwd_type_t = copy_rp_t<std::conditional_t<std::is_lvalue_reference_v<From>, From, From&&>, copy_cv_t<From, To>>;
 
 template <typename From, typename To>
 decltype(auto) fwd_like(To&& obj_ref)
 {
-    return static_cast<fwd_like_t<From, To>>(obj_ref);
+    return static_cast<fwd_type_t<From, To>>(obj_ref);
 }
 
 //=============================================================================
+
 namespace detail {
     template <typename T> struct to_const_impl      { using type = T const & ; };
     template <typename T> struct to_const_impl<T&&> { using type = T const &&; };
@@ -138,100 +154,241 @@ template <typename T>     using  to_non_const = typename detail::to_non_const_im
 //=============================================================================
 template <template <typename> class Op, typename T>
 auto&& cast(T&& item) {
-    return std::forward<fwd_like_t<T, Op<T>>>(const_cast<strip_t<T>&>(item));
+    return std::forward<fwd_type_t<T, Op<T>>>(const_cast<strip_t<T>&>(item));
 }
 
+//=============================================================================
+template<typename Derived, typename...Ts>
+struct emplace_params final
+{
+    // Unfortunately, ref qualifier not avalilable for constructors. :(
+    // Would be nice to be able to limit when an lvalue or rvalue can be made.
+    emplace_params(Ts&&...args)
+        : ref_storage(std::forward<Ts>(args)...)
+    {}
 
-static_assert(std::is_same_v<fwd_like_t<int const, float&>, float const&&>, "");
+    void uninitialized_construct(void* storage)
+        noexcept(noexcept(Derived(std::forward<Ts>(std::declval<Ts>())...)))
+    {
+        std::apply([storage](auto &&... args) {
+            new (storage) Derived(std::forward<Ts>(args)...);
+            }, ref_storage);
+    }
+
+    void uninitialized_construct(void* storage) const
+        noexcept(noexcept(Derived(std::forward<to_const_rvalue<Ts>>(std::declval<Ts>())...)))
+    {
+        std::apply([storage](auto &&... args) {
+            new (storage) Derived(std::forward<to_const_rvalue<Ts>>(args)...);
+            }, ref_storage);
+    }
+
+private:
+    std::tuple<decltype(std::forward<Ts>(std::declval<Ts>()))...> ref_storage;
+};
+
+template <typename T, typename...Ts>
+auto emplace(Ts&& ...args)
+{
+    return emplace_params<T, Ts...>(std::forward<Ts>(args)...);
+}
+
+static_assert(std::is_same_v<fwd_type_t<int const, float&>, float const&&>, "");
 
 // TODO: Will need copy/move constructor/assigment operators
 template <typename T, typename Derived>
-class destructive_move_container_impl;
+class destructively_movable_impl;
 
-template <typename T, typename Is_valid = void>
-class destructive_move_container
-    : public destructive_move_container_impl<T, destructive_move_container<T, Is_valid>>
+struct default_empty {};
+
+template <typename Contained, typename Is_valid = void>
+class destructively_movable
+    : public destructively_movable_impl<Contained, destructively_movable<Contained, Is_valid>>
 {
-    using base = destructive_move_container_impl<T, destructive_move_container<T, Is_valid>>;
+    using base = destructively_movable_impl<Contained, destructively_movable<Contained, Is_valid>>;
 public:
-    void is_valid(bool value)                {        Is_valid(this, value); }
-    void is_valid(bool value)       volatile {        Is_valid(this, value); }
-    bool is_valid(          ) const          { return Is_valid(this); }
-    bool is_valid(          ) const volatile { return Is_valid(this); }
+    void is_valid(bool value)                noexcept {        Is_valid(this, value); }
+    void is_valid(bool value)       volatile noexcept {        Is_valid(this, value); }
+    bool is_valid(          ) const          noexcept { return Is_valid(this); }
+    bool is_valid(          ) const volatile noexcept { return Is_valid(this); }
 
     using base::base;
 };
 
-template <typename T>
-class destructive_move_container<T, void>
-    : public destructive_move_container_impl<T, destructive_move_container<T, void>>
+template <typename Contained>
+class destructively_movable<Contained, void>
+    : public destructively_movable_impl<Contained, destructively_movable<Contained, void>>
 {
-    using base = destructive_move_container_impl<T, destructive_move_container<T, void>>;
+    using base = destructively_movable_impl<Contained, destructively_movable<Contained, void>>;
     bool m_isValid;
 public:
-    void is_valid(bool value)                {        m_isValid = value; }
-    void is_valid(bool value)       volatile {        m_isValid = value; }
-    bool is_valid(          ) const          { return m_isValid; }
-    bool is_valid(          ) const volatile { return m_isValid; }
+    void is_valid(bool value)                noexcept {        m_isValid = value; }
+    void is_valid(bool value)       volatile noexcept {        m_isValid = value; }
+    bool is_valid(          ) const          noexcept { return m_isValid; }
+    bool is_valid(          ) const volatile noexcept { return m_isValid; }
 
     using base::base;
 };
 
-template <typename T, typename Derived>
-class destructive_move_container_impl
+template <typename Contained, typename Derived>
+class destructively_movable_impl
 {
-    Derived                * derived()                { return static_cast<Derived                *>(this); }
-    Derived       volatile * derived()       volatile { return static_cast<Derived       volatile *>(this); }
-    Derived const          * derived() const          { return static_cast<Derived const          *>(this); }
-    Derived const volatile * derived() const volatile { return static_cast<Derived const volatile *>(this); }
+    Derived                * derived()                noexcept { return static_cast<Derived                *>(this); }
+    Derived       volatile * derived()       volatile noexcept { return static_cast<Derived       volatile *>(this); }
+    Derived const          * derived() const          noexcept { return static_cast<Derived const          *>(this); }
+    Derived const volatile * derived() const volatile noexcept { return static_cast<Derived const volatile *>(this); }
 
-    char m_storage[sizeof(T)];
+    alignas(Contained) char m_storage[std::is_empty<Contained>::value ? 0 : sizeof(Contained)];
 
     template <typename U>
     static auto&& object(U&& this_ref) noexcept
     {
         assert(this_ref.is_valid());
         return fwd_like<U>(
-            reinterpret_cast<copy_cv_t<U, T>&>(
+            reinterpret_cast<copy_cv_t<U, Contained>&>(
                 *this_ref.m_storage
             )
         );
     }
 
-public:
+    template <typename T> struct bare_type_impl                                { using type = T; };
+    template <typename T> struct bare_type_impl<destructively_movable<T>> { using type = T; };
 
-    template <typename...Ts>
-    destructive_move_container_impl(Ts&&...args)
+    // Strips and extract the wrapped type or if not wrapped, just return the type.
+    template <typename T> using  bare_t = typename bare_type_impl<strip_t<T>>::type;
+    
+    template <typename T> using  fwd_to_bare_type_t = fwd_type_t<T, bare_t<T>>;
+
+public:
+    destructively_movable_impl(default_empty const& obj) noexcept {
+        is_valid(false);
+    }
+
+
+    // Copy/move constructor of destructively_movable<T>, where T is derived from Contained.
+    template <typename T, std::enable_if_t<std::is_base_of<Contained, bare_t<T>>::value, int> = 0>
+    destructively_movable_impl(T&& obj) noexcept(noexcept(
+        destructively_movable_impl(emplace<bare_t<T>>(std::forward<fwd_to_bare_type_t<T>>(object(obj))))
+    ))
+        : destructively_movable_impl(emplace<bare_t<T>>(std::forward<fwd_to_bare_type_t<T>>(object(obj))))
     {
+        assert(is_valid());
+    }
+
+    // Constructor does emplace construction of Contained.
+    template <typename...Ts>
+    destructively_movable_impl(Ts&&...construct) noexcept(noexcept(
+        destructively_movable_impl(emplace<Contained>(std::forward<Ts>(construct)...))
+    ))
+        : destructively_movable_impl(emplace<Contained>(std::forward<Ts>(construct)...))
+    {
+        assert(is_valid());
+    }
+
+    // Constructor does emplace construction of T
+    // If going to accept derived types, then the size of objects must be the same.
+    template <typename T, typename...Ts
+        , std::enable_if_t<
+            std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
+        , int> = 0>
+    destructively_movable_impl(emplace_params<T, Ts...>&& construct) noexcept(noexcept(
+        construct.uninitialized_construct(m_storage)
+    ))
+    {
+        OUTPUT_FUNC;
         // Due to using the CRTP, need to init is_valid in base class.  Might
         // have some performance impact is using external flag.
-        is_valid(false);
-        construct(std::forward<Ts>(args)...);
-    }
-
-    ~destructive_move_container_impl()
-    {
-        if (is_valid()) {
-            object().~T();
-        }
-    }
-
-    template <typename...Ts>
-    void construct(Ts&&...args) {
-        assert(!is_valid());
-        new (m_storage) T(std::forward<Ts>(args)...);
+        construct.uninitialized_construct(m_storage);
         is_valid(true);
     }
 
-    void destruct() {
-        is_valid(false);
-        object().~destructive_move_container();
+    // Constructor does emplace construction of T
+    // If going to accept derived types, then the size of objects must be the same.
+    template <typename T, typename...Ts
+        , std::enable_if_t<
+            std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
+        , int> = 0>
+    destructively_movable_impl(emplace_params<T, Ts...> const& construct) noexcept(noexcept(
+        construct.uninitialized_construct(m_storage)
+    ))
+    {
+        OUTPUT_FUNC;
+        construct.uninitialized_construct(m_storage);
+        is_valid(true);
     }
 
-    void is_valid(bool value)                {        derived()->is_valid(value); }
-    void is_valid(bool value)       volatile {        derived()->is_valid(value); }
-    bool is_valid(          ) const          { return derived()->is_valid(); }
-    bool is_valid(          ) const volatile { return derived()->is_valid(); }
+    ~destructively_movable_impl()
+    {
+        if constexpr (!std::is_trivially_destructible<Contained>::value) {
+            if (is_valid()) {
+                object().~Contained();
+            }
+        }
+    }
+
+    // Copy/move construction of destructively_movable<T>, where T is derived from Contained.
+    template <typename T, std::enable_if_t<std::is_base_of<Contained, bare_t<T>>::value, int> = 0>
+    auto& construct(T&& obj) noexcept(noexcept(
+        destructively_movable_impl(emplace<bare_t<T>>(std::forward<fwd_to_bare_type_t<T>>(object(obj))))
+    ))
+    {
+        OUTPUT_FUNC;
+        assert(!is_valid());
+        return *new (this) destructively_movable_impl(emplace<bare_t<T>>(std::forward<fwd_to_bare_type_t<T>>(object(obj))));
+    }
+
+    // construct does emplace construction of Contained.
+    template <typename...Ts>
+    auto& construct(Ts&&...construct) noexcept(noexcept(
+        destructively_movable_impl(emplace<Contained>(std::forward<Ts>(construct)...))
+    ))
+    {
+        OUTPUT_FUNC;
+        assert(!is_valid());
+        return *new (this) destructively_movable_impl(emplace<Contained>(std::forward<Ts>(construct)...));
+    }
+
+    // construct does emplace construction of T
+    // If going to accept derived types, then the size of objects must be the same.
+    template <typename T, typename...Ts
+        , std::enable_if_t<
+            std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
+        , int> = 0>
+    auto& construct(emplace_params<T, Ts...>&& construct) noexcept(noexcept(
+        construct.uninitialized_construct(m_storage)
+    ))
+    {
+        OUTPUT_FUNC;
+        assert(!is_valid());
+        return *new (this) destructively_movable_impl(std::move(construct));
+    }
+
+    // construct does emplace construction of T
+    // If going to accept derived types, then the size of objects must be the same.
+    template <typename T, typename...Ts
+        , std::enable_if_t<
+            std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
+        , int> = 0>
+    auto& construct(emplace_params<T, Ts...> const& construct) noexcept(noexcept(
+        construct.uninitialized_construct(m_storage)
+    ))
+    {
+        OUTPUT_FUNC;
+        assert(!is_valid());
+        return *new (this) destructively_movable_impl(          construct );
+    }
+
+    void destruct()
+    {
+        assert(is_valid());
+        this->~Contained();
+        is_valid(false);
+    }
+
+    void is_valid(bool value)                noexcept {        derived()->is_valid(value); }
+    void is_valid(bool value)       volatile noexcept {        derived()->is_valid(value); }
+    bool is_valid(          ) const          noexcept { return derived()->is_valid(); }
+    bool is_valid(          ) const volatile noexcept { return derived()->is_valid(); }
 
 
     // Access object as lvalue reference
@@ -270,8 +427,8 @@ public:
     //   ==================+============+======================++===========
     //     T&& from &&     | downcast   | true                 ||  implicit 
     //     T&  from &      | downcast   | true                 ||  implicit 
-    //     T&& from &&     | upcast     | true                 ||  explicit  // This will not throw. Use
-    //     T&  from &      | upcast     | true                 ||  explicit  // polymorph_dynamic_cast for that.
+    //     T&& from &&     | upcast     | true                 ||  explicit  // This will not throw. Need a special
+    //     T&  from &      | upcast     | true                 ||  explicit  // X_dynamic_cast for that.
     //   ------------------+------------+----------------------++-----------
     //     T&& from &&     | don't care | false                ||  explicit 
     //     T&  from &      | don't care | false                ||  explicit 
@@ -293,8 +450,8 @@ public:
     // template <typename U> operator U&&() was a universal reference
     // conversion function. 
 
-#define IS_DOWNCAST (std::is_base_of<strip_t<U>, T>::value)
-#define IS_UPCAST   (std::is_base_of<T, strip_t<U>>::value && !std::is_same<T, strip_t<U>>::value)
+#define IS_DOWNCAST (std::is_base_of<strip_t<U>, Contained>::value)
+#define IS_UPCAST   (std::is_base_of<Contained, strip_t<U>>::value && !std::is_same<Contained, strip_t<U>>::value)
 // Using ... instead of a named parameter because when enabler(const_volatile) is called with
 // const_volatile being blank (no cv), VC++ complains.
 #define IS_CV_STRONGER_OR_SAME(...) (is_stronger_or_same_cv_v<U, int __VA_ARGS__>)
@@ -348,7 +505,7 @@ struct X {
 };
 int main()
 {
-    destructive_move_container<X> x;
+    destructively_movable<X> x;
     std::cout << "\nlvalues\n";
     x->test();
 
@@ -365,16 +522,16 @@ int main()
     static_cast<X const volatile &&>(x).test();
 
     std::cout << "\nlvalues\n";
-    static_cast<destructive_move_container<X>                & >(x)->test();
-    static_cast<destructive_move_container<X>       volatile & >(x)->test();
-    static_cast<destructive_move_container<X> const          & >(x)->test();
-    static_cast<destructive_move_container<X> const volatile & >(x)->test();
+    static_cast<destructively_movable<X>                & >(x)->test();
+    static_cast<destructively_movable<X>       volatile & >(x)->test();
+    static_cast<destructively_movable<X> const          & >(x)->test();
+    static_cast<destructively_movable<X> const volatile & >(x)->test();
 
     std::cout << "\nlvalues\n";
-    static_cast<destructive_move_container<X>                &&>(x)->test();
-    static_cast<destructive_move_container<X>       volatile &&>(x)->test();
-    static_cast<destructive_move_container<X> const          &&>(x)->test();
-    static_cast<destructive_move_container<X> const volatile &&>(x)->test();
+    static_cast<destructively_movable<X>                &&>(x)->test();
+    static_cast<destructively_movable<X>       volatile &&>(x)->test();
+    static_cast<destructively_movable<X> const          &&>(x)->test();
+    static_cast<destructively_movable<X> const volatile &&>(x)->test();
 
     std::cout << "Hello World!\n"; 
 }
