@@ -83,6 +83,16 @@ template <typename T0, typename T1>
 constexpr bool is_stronger_or_same_cv_v = is_stronger_cv_v<T0, T1> || is_same_cv_v<T0, T1>;
 
 //=============================================================================
+// Remove reference and any cv qualifiers. (like in C++20)
+template <typename T>
+using  remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
+
+//=============================================================================
+// Remove reference, first level pointer and any cv qualifiers.
+template <typename T>
+using  strip_t = std::remove_cv_t<std::remove_pointer_t<std::remove_reference_t<T>>>;
+
+//=============================================================================
 namespace detail {
     template <typename From, typename To> struct copy_rp               { using type = std::remove_reference_t<To>    ; };
     template <typename From, typename To> struct copy_rp<From &  , To> { using type = std::remove_reference_t<To> &  ; };
@@ -101,23 +111,17 @@ namespace detail {
     template <typename From, typename To> struct copy_cv<From       volatile, To> { using type = To        volatile; };
     template <typename From, typename To> struct copy_cv<From const volatile, To> { using type = To  const volatile; };
 }
-// Copies const/volatile from From to To.
+// Copies const/volatile from From to To behind reference and first level pointer if any.
 //
 // Any reference is first removed from From.
-template <typename From, typename To> using  copy_cv_t
-= copy_rp_t<To, typename detail::copy_cv<std::remove_reference_t<From>, std::remove_pointer_t<std::remove_reference_t<To>>>::type>;
-
-//=============================================================================
-// Remove reference, first level pointer and any cv qualifiers.
-// Should prolly get rid of array and all pointers?  Should I get rid of pointers?  Dunno...
-template <typename T>
-using  strip_t = std::remove_cv_t<std::remove_pointer_t<std::remove_reference_t<T>>>;
+template <typename From, typename To>
+using  copy_cv_t = copy_rp_t<To, typename detail::copy_cv<std::remove_reference_t<From>, strip_t<To>>::type>;
 
 //=============================================================================
 // Used for std::forward to take a type From and copy its cv and rp over to
 // type To.
 template <typename From, typename To>
-using  fwd_type_t = copy_rp_t<std::conditional_t<std::is_lvalue_reference_v<From>, From, From&&>, copy_cv_t<From, To>>;
+using  fwd_type_t = copy_rp_t<From, copy_cv_t<From, To>>;
 
 template <typename From, typename To>
 decltype(auto) fwd_like(To&& obj_ref)
@@ -125,14 +129,10 @@ decltype(auto) fwd_like(To&& obj_ref)
     return static_cast<fwd_type_t<From, To>>(obj_ref);
 }
 
+static_assert(std::is_same_v<fwd_type_t<int const, float&>, float const>, "");
 //=============================================================================
 
-namespace detail {
-    template <typename T> struct to_const_impl      { using type = T const & ; };
-    template <typename T> struct to_const_impl<T&&> { using type = T const &&; };
-    template <typename T> struct to_const_impl<T* > { using type = T const * ; };
-}
-template <typename T>     using  to_const = typename detail::to_const_impl<T>::type;
+template <typename T>     using  to_const = const T;
 
 //=============================================================================
 namespace detail {
@@ -140,6 +140,13 @@ namespace detail {
     template <typename T> struct to_const_rvalue_impl<T&&> { using type = T const&&; };
 }
 template <typename T>     using  to_const_rvalue = typename detail::to_const_rvalue_impl<T>::type;
+
+//=============================================================================
+namespace detail {
+    template <typename T> struct to_const_lvalue_impl      { using type = T; };
+    template <typename T> struct to_const_lvalue_impl<T&&> { using type = T const&&; };
+}
+template <typename T>     using  to_const_lvalue = typename detail::to_const_lvalue_impl<T>::type;
 
 //=============================================================================
 namespace detail {
@@ -154,15 +161,22 @@ template <typename T>     using  to_non_const = typename detail::to_non_const_im
 //=============================================================================
 template <template <typename> class Op, typename T>
 auto&& cast(T&& item) {
-    return std::forward<fwd_type_t<T, Op<T>>>(const_cast<strip_t<T>&>(item));
+    return std::forward<fwd_type_t<T, Op<T>>>(const_cast<remove_cvref_t<T>&>(item));
 }
 
 //=============================================================================
 template<typename Derived, typename...Ts>
+struct emplace_params;
+
+template <typename...Ts>
+auto&& get_first(emplace_params<Ts...>& params);
+
+template<typename Derived, typename...Ts>
 struct emplace_params final
 {
-    // Unfortunately, ref qualifier not avalilable for constructors. :(
-    // Would be nice to be able to limit when an lvalue or rvalue can be made.
+    template <typename...Ts>
+    friend auto&& get_first(emplace_params<Ts...>& params);
+
     emplace_params(Ts&&...args)
         : ref_storage(std::forward<Ts>(args)...)
     {}
@@ -172,15 +186,16 @@ struct emplace_params final
     {
         std::apply([storage](auto &&... args) {
             new (storage) Derived(std::forward<Ts>(args)...);
-            }, ref_storage);
+        }, ref_storage);
     }
 
+    // If "this" is const, then passed the parameters as not modifiable (const)
     void uninitialized_construct(void* storage) const
-        noexcept(noexcept(Derived(std::forward<to_const_rvalue<Ts>>(std::declval<Ts>())...)))
+        noexcept(noexcept(Derived(std::forward<to_const_lvalue<Ts>>(std::declval<Ts>())...)))
     {
         std::apply([storage](auto &&... args) {
-            new (storage) Derived(std::forward<to_const_rvalue<Ts>>(args)...);
-            }, ref_storage);
+            new (storage) Derived(std::forward<to_const_lvalue<Ts>>(args)...);
+        }, ref_storage);
     }
 
 private:
@@ -193,7 +208,11 @@ auto emplace(Ts&& ...args)
     return emplace_params<T, Ts...>(std::forward<Ts>(args)...);
 }
 
-static_assert(std::is_same_v<fwd_type_t<int const, float&>, float const&&>, "");
+template <typename...Ts>
+auto&& get_first(emplace_params<Ts...>& params)
+{
+    return std::get<0>(params.ref_storage);
+}
 
 // TODO: Will need copy/move constructor/assigment operators
 template <typename T, typename Derived>
@@ -207,6 +226,21 @@ class destructively_movable
 {
     using base = destructively_movable_impl<Contained, destructively_movable<Contained, Is_valid>>;
 public:
+    // Note: By defining the copy/move constructor/assignment operator members
+    //       explicitly like this, the base copy constructor/assignmnt
+    //       operator members are ignored since the templated constructor/
+    //       assigment that take a universal reference is a better match.
+    //       (destructively_movable const& over destructively_movable_impl
+    //       const&).  The only way to call that copy constructor is to
+    //       instantiate the base class directly, or explicitly call the
+    //       assignment operator, if they existed.  However they've been
+    //       deleted those anyway if someone were so inclided.
+    destructively_movable(destructively_movable     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
+    destructively_movable(destructively_movable const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
+
+    auto&& operator=(destructively_movable     && obj) noexcept(noexcept(base::operator=(std::move(obj)))) { return base::operator=(std::move(obj)); }
+    auto&& operator=(destructively_movable const& obj) noexcept(noexcept(base::operator=(          obj ))) { return base::operator=(          obj ); }
+
     void is_valid(bool value)                noexcept {        Is_valid(this, value); }
     void is_valid(bool value)       volatile noexcept {        Is_valid(this, value); }
     bool is_valid(          ) const          noexcept { return Is_valid(this); }
@@ -222,6 +256,26 @@ class destructively_movable<Contained, void>
     using base = destructively_movable_impl<Contained, destructively_movable<Contained, void>>;
     bool m_isValid;
 public:
+    // This copy/move constructor is needed because on copying/moving,
+    // m_isValid will be updated after is was already set by the
+    // base copy/move constructor.  This either invalidates the value
+    // or does an extra copy.
+    //
+    // Note: By defining the copy/move constructor/assignment operator members
+    //       explicitly like this, the base copy constructor/assignmnt
+    //       operator members are ignored since the templated constructor/
+    //       assigment that take a universal reference is a better match.
+    //       (destructively_movable const& over destructively_movable_impl
+    //       const&).  The only way to call that copy constructor is to
+    //       instantiate the base class directly, or explicitly call the
+    //       assignment operator, if they existed.  However they've been
+    //       deleted those anyway if someone were so inclided.
+    destructively_movable(destructively_movable     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
+    destructively_movable(destructively_movable const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
+
+    destructively_movable&& operator=(destructively_movable     && obj) noexcept(noexcept(base::operator=(std::move(obj)))) { return base::operator=(std::move(obj)); }
+    destructively_movable&& operator=(destructively_movable const& obj) noexcept(noexcept(base::operator=(          obj ))) { return base::operator=(          obj ); }
+
     void is_valid(bool value)                noexcept {        m_isValid = value; }
     void is_valid(bool value)       volatile noexcept {        m_isValid = value; }
     bool is_valid(          ) const          noexcept { return m_isValid; }
@@ -229,6 +283,12 @@ public:
 
     using base::base;
 };
+
+template <typename T>
+struct is_destructively_movable : std::false_type {};
+
+template <typename T, typename I>
+struct is_destructively_movable<destructively_movable<T, I>> : std::true_type {};
 
 template <typename Contained, typename Derived>
 class destructively_movable_impl
@@ -260,22 +320,19 @@ class destructively_movable_impl
     template <typename T> using  fwd_to_bare_type_t = fwd_type_t<T, bare_t<T>>;
 
 public:
+    using type = Contained;
     destructively_movable_impl(default_empty const& obj) noexcept {
         is_valid(false);
     }
 
-
-    // Copy/move constructor of destructively_movable<T>, where T is derived from Contained.
-    template <typename T, std::enable_if_t<std::is_base_of<Contained, bare_t<T>>::value, int> = 0>
-    destructively_movable_impl(T&& obj) noexcept(noexcept(
-        destructively_movable_impl(emplace<bare_t<T>>(std::forward<fwd_to_bare_type_t<T>>(object(obj))))
-    ))
-        : destructively_movable_impl(emplace<bare_t<T>>(std::forward<fwd_to_bare_type_t<T>>(object(obj))))
-    {
-        assert(is_valid());
-    }
-
-    // Constructor does emplace construction of Contained.
+    // Does emplace construction of Contained, including "move/copy
+    // construction".
+    //
+    // NOTE: Neither move or copy constructors would actually be called because
+    //       this class is never passed a destructively_movable_impl const& or
+    //       destructively_movable_impl&& directly anyway, since the derived
+    //       class explicitly passes a destructively_movable const& or
+    //       destructively_movable&& respectively.
     template <typename...Ts>
     destructively_movable_impl(Ts&&...construct) noexcept(noexcept(
         destructively_movable_impl(emplace<Contained>(std::forward<Ts>(construct)...))
@@ -285,7 +342,9 @@ public:
         assert(is_valid());
     }
 
-    // Constructor does emplace construction of T
+    destructively_movable_impl(destructively_movable_impl const&) = delete;
+
+    // Does emplace construction of T
     // If going to accept derived types, then the size of objects must be the same.
     template <typename T, typename...Ts
         , std::enable_if_t<
@@ -295,14 +354,27 @@ public:
         construct.uninitialized_construct(m_storage)
     ))
     {
-        OUTPUT_FUNC;
-        // Due to using the CRTP, need to init is_valid in base class.  Might
-        // have some performance impact is using external flag.
+        //OUTPUT_FUNC;
         construct.uninitialized_construct(m_storage);
+        // HMMMMM. Need more than this I think as this can leave the object
+        // potentially hanging on to resources.  Or should that be on the
+        // onus of the user who implements the move constructor?
+        if constexpr (sizeof...(Ts) == 1)
+        {
+            using first_element = std::tuple_element_t<0, std::tuple<Ts...>>;
+            clear_is_valid_if_moving_distructively_movable(
+                std::forward<first_element>(get_first(construct))
+            );
+        }
         is_valid(true);
     }
 
-    // Constructor does emplace construction of T
+    // Does emplace construction of T.
+    //
+    // A const emplace_params implies that all params passed to constructor
+    // will be const lvalues, regardless of what they actually were.  This
+    // allows for safe reuse of an emplace_params.
+    //
     // If going to accept derived types, then the size of objects must be the same.
     template <typename T, typename...Ts
         , std::enable_if_t<
@@ -326,29 +398,18 @@ public:
         }
     }
 
-    // Copy/move construction of destructively_movable<T>, where T is derived from Contained.
-    template <typename T, std::enable_if_t<std::is_base_of<Contained, bare_t<T>>::value, int> = 0>
-    auto& construct(T&& obj) noexcept(noexcept(
-        destructively_movable_impl(emplace<bare_t<T>>(std::forward<fwd_to_bare_type_t<T>>(object(obj))))
-    ))
-    {
-        OUTPUT_FUNC;
-        assert(!is_valid());
-        return *new (this) destructively_movable_impl(emplace<bare_t<T>>(std::forward<fwd_to_bare_type_t<T>>(object(obj))));
-    }
-
-    // construct does emplace construction of Contained.
+    // Does emplace construction of Contained, including copy/move construction.
     template <typename...Ts>
     auto& construct(Ts&&...construct) noexcept(noexcept(
-        destructively_movable_impl(emplace<Contained>(std::forward<Ts>(construct)...))
-    ))
+            Derived(emplace<Contained>(std::forward<Ts>(construct)...))
+        ))
     {
         OUTPUT_FUNC;
         assert(!is_valid());
-        return *new (this) destructively_movable_impl(emplace<Contained>(std::forward<Ts>(construct)...));
+        return *new (this) Derived(emplace<Contained>(std::forward<Ts>(construct)...));
     }
 
-    // construct does emplace construction of T
+    // Does emplace construction of T
     // If going to accept derived types, then the size of objects must be the same.
     template <typename T, typename...Ts
         , std::enable_if_t<
@@ -360,7 +421,7 @@ public:
     {
         OUTPUT_FUNC;
         assert(!is_valid());
-        return *new (this) destructively_movable_impl(std::move(construct));
+        return *new (this) Derived(std::move(construct));
     }
 
     // construct does emplace construction of T
@@ -369,19 +430,72 @@ public:
         , std::enable_if_t<
             std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
         , int> = 0>
-    auto& construct(emplace_params<T, Ts...> const& construct) noexcept(noexcept(
-        construct.uninitialized_construct(m_storage)
-    ))
+    auto& construct(emplace_params<T, Ts...> const& construct) noexcept(
+        noexcept(construct.uninitialized_construct(m_storage))
+    )
     {
         OUTPUT_FUNC;
         assert(!is_valid());
-        return *new (this) destructively_movable_impl(          construct );
+        return *new (this) Derived(          construct );
     }
+
+    destructively_movable_impl& operator=(destructively_movable_impl const&) = delete;
+
+private:
+
+    template <typename T>
+    static void clear_is_valid_if_moving_distructively_movable(T&& value) noexcept
+    {
+        if constexpr (is_destructively_movable<T>::value)
+        {
+            // NOTE: is_destructively_movable<first_element>::value implies
+            //       that first_element is an rvalue, otherwise it would be
+            //       an lvalue reference, which would fail to match.
+            if constexpr (std::is_same<Contained, typename T::type>::value)
+            {
+                // Operation was a move on a destructively_movable object.
+                value.is_valid(false);
+            }
+        }
+    }
+
+    template <typename T, typename U>
+    static auto&& assign(T&& lhs, U&& rhs)
+        //noexcept(
+        //    noexcept(std::forward<T>(lhs).object().operator=(std::forward<U>(rhs)))
+        //    && noexcept(lhs.construct(std::forward<U>(rhs)))
+        //)
+    {
+        if (lhs.is_valid()) {
+            if constexpr (is_destructively_movable<U>::value) {
+                // Only assign something if there is something to assign.
+                if (rhs.is_valid()) {
+                    std::forward<T>(lhs).object().operator=(std::forward<U>(rhs));
+                }
+            }
+            else {
+                std::forward<T>(lhs).object().operator=(std::forward<U>(rhs));
+            }
+        }
+        else {
+            lhs.construct(std::forward<U>(rhs));
+        }
+        assert(!is_destructively_movable<U>::value || lhs.is_valid());
+        clear_is_valid_if_moving_distructively_movable(std::forward<U>(rhs));
+        return std::forward<T>(lhs);
+    }
+
+public:
+    template <typename T> Derived&& operator=(T&& rhs)          &  noexcept(noexcept(assign(         (*this), std::forward<T>(rhs)))) { return assign(         (*this), std::forward<T>(rhs)); }
+    template <typename T> Derived&& operator=(T&& rhs) volatile &  noexcept(noexcept(assign(         (*this), std::forward<T>(rhs)))) { return assign(         (*this), std::forward<T>(rhs)); }
+    // Does it even make sense to assign to a rvalue?  Limited value?
+    template <typename T> Derived&& operator=(T&& rhs)          && noexcept(noexcept(assign(std::move(*this), std::forward<T>(rhs)))) { return assign(std::move(*this), std::forward<T>(rhs)); }
+    template <typename T> Derived&& operator=(T&& rhs) volatile && noexcept(noexcept(assign(std::move(*this), std::forward<T>(rhs)))) { return assign(std::move(*this), std::forward<T>(rhs)); }
 
     void destruct()
     {
         assert(is_valid());
-        this->~Contained();
+        object().~Contained();
         is_valid(false);
     }
 
@@ -514,6 +628,8 @@ int main()
     static_cast<X       volatile & >(x).test();
     static_cast<X const          & >(x).test();
     static_cast<X const volatile & >(x).test();
+    x.destruct();
+    x.construct(emplace<X>());
 
     std::cout << "\nrvalues\n";
     static_cast<X                &&>(x).test();
@@ -533,7 +649,9 @@ int main()
     static_cast<destructively_movable<X> const          &&>(x)->test();
     static_cast<destructively_movable<X> const volatile &&>(x)->test();
 
-    std::cout << "Hello World!\n"; 
+    destructively_movable<X> x1(std::move(x));
+    x1->test();
+    std::cout << "Hello World!\n";
 }
 
 //To automatically close the console when debugging stops, enable Tools->Options->Debugging->Automatically close the console when debugging stops.
