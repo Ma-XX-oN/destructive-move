@@ -22,4 +22,12 @@
   <ItemGroup>
     <Natvis Include="visualiser.natvis" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="utility.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="destructive_move.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
 </Project>

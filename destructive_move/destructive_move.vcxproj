@@ -166,6 +166,10 @@
   <ItemGroup>
     <Natvis Include="visualiser.natvis" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="destructive_move.hpp" />
+    <ClInclude Include="utility.hpp" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
