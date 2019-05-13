@@ -19,6 +19,9 @@
 # define NO_VTABLE 
 #endif
 
+// Generate an error to see what the type that is being dealt with.
+#define INTEROGATE_TYPE(x) static_cast<decltype(x)>(nullptr)
+
 #define OUTPUT_FUNC (std::cout << (void*)this << " " << FUNCSIG << "\n")
 
 //=============================================================================
@@ -126,7 +129,7 @@ using  fwd_type_t = copy_rp_t<From, copy_cv_t<From, To>>;
 template <typename From, typename To>
 decltype(auto) fwd_like(To&& obj_ref)
 {
-    return static_cast<fwd_type_t<From, To>>(obj_ref);
+    return std::forward<fwd_type_t<From, To>>(obj_ref);
 }
 
 static_assert(std::is_same_v<fwd_type_t<int const, float&>, float const>, "");
@@ -149,19 +152,14 @@ namespace detail {
 template <typename T>     using  to_const_lvalue = typename detail::to_const_lvalue_impl<T>::type;
 
 //=============================================================================
-namespace detail {
-    template <typename T> struct to_non_const_impl            { using type = T & ; };
-    template <typename T> struct to_non_const_impl<T      &&> { using type = T &&; };
-    template <typename T> struct to_non_const_impl<T const& > { using type = T & ; };
-    template <typename T> struct to_non_const_impl<T const&&> { using type = T &&; };
-    template <typename T> struct to_non_const_impl<T const* > { using type = T * ; };
-}
-template <typename T>     using  to_non_const = typename detail::to_non_const_impl<T>::type;
-
-//=============================================================================
 template <template <typename> class Op, typename T>
 auto&& cast(T&& item) {
-    return std::forward<fwd_type_t<T, Op<T>>>(const_cast<remove_cvref_t<T>&>(item));
+    return std::forward<fwd_type_t<T, Op<T>>>(const_cast<remove_cvref_t<T>&&>(item));
+}
+
+template <template <typename> class Op, typename T>
+auto&& cast(T&  item) {
+    return std::forward<fwd_type_t<T, Op<T>>>(const_cast<remove_cvref_t<T>& >(item));
 }
 
 //=============================================================================
@@ -174,8 +172,8 @@ auto&& get_first(emplace_params<Ts...>& params);
 template<typename Derived, typename...Ts>
 struct emplace_params final
 {
-    template <typename...Ts>
-    friend auto&& get_first(emplace_params<Ts...>& params);
+    template <typename...Us>
+    friend auto&& get_first(emplace_params<Us...>& params);
 
     emplace_params(Ts&&...args)
         : ref_storage(std::forward<Ts>(args)...)
@@ -214,17 +212,19 @@ auto&& get_first(emplace_params<Ts...>& params)
     return std::get<0>(params.ref_storage);
 }
 
-// TODO: Will need copy/move constructor/assigment operators
-template <typename T, typename Derived>
-class destructively_movable_impl;
-
 struct default_empty {};
+
+namespace detail
+{
+    template <typename T, typename Derived>
+    class destructively_movable_impl;
+}
 
 template <typename Contained, typename Is_valid = void>
 class destructively_movable
-    : public destructively_movable_impl<Contained, destructively_movable<Contained, Is_valid>>
+    : public detail::destructively_movable_impl<Contained, destructively_movable<Contained, Is_valid>>
 {
-    using base = destructively_movable_impl<Contained, destructively_movable<Contained, Is_valid>>;
+    using base = detail::destructively_movable_impl<Contained, destructively_movable<Contained, Is_valid>>;
 public:
     // Note: By defining the copy/move constructor/assignment operator members
     //       explicitly like this, the base copy constructor/assignmnt
@@ -238,8 +238,15 @@ public:
     destructively_movable(destructively_movable     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
     destructively_movable(destructively_movable const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
 
-    auto&& operator=(destructively_movable     && obj) noexcept(noexcept(base::operator=(std::move(obj)))) { return base::operator=(std::move(obj)); }
-    auto&& operator=(destructively_movable const& obj) noexcept(noexcept(base::operator=(          obj ))) { return base::operator=(          obj ); }
+    destructively_movable&  operator=(destructively_movable     && obj)          &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    destructively_movable&  operator=(destructively_movable const& obj)          &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    destructively_movable&  operator=(destructively_movable     && obj) volatile &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    destructively_movable&  operator=(destructively_movable const& obj) volatile &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+
+    destructively_movable&& operator=(destructively_movable     && obj)          && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    destructively_movable&& operator=(destructively_movable const& obj)          && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    destructively_movable&& operator=(destructively_movable     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    destructively_movable&& operator=(destructively_movable const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
 
     void is_valid(bool value)                noexcept {        Is_valid(this, value); }
     void is_valid(bool value)       volatile noexcept {        Is_valid(this, value); }
@@ -251,9 +258,9 @@ public:
 
 template <typename Contained>
 class destructively_movable<Contained, void>
-    : public destructively_movable_impl<Contained, destructively_movable<Contained, void>>
+    : public detail::destructively_movable_impl<Contained, destructively_movable<Contained, void>>
 {
-    using base = destructively_movable_impl<Contained, destructively_movable<Contained, void>>;
+    using base = detail::destructively_movable_impl<Contained, destructively_movable<Contained, void>>;
     bool m_isValid;
 public:
     // This copy/move constructor is needed because on copying/moving,
@@ -273,8 +280,15 @@ public:
     destructively_movable(destructively_movable     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
     destructively_movable(destructively_movable const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
 
-    destructively_movable&& operator=(destructively_movable     && obj) noexcept(noexcept(base::operator=(std::move(obj)))) { return base::operator=(std::move(obj)); }
-    destructively_movable&& operator=(destructively_movable const& obj) noexcept(noexcept(base::operator=(          obj ))) { return base::operator=(          obj ); }
+    destructively_movable&  operator=(destructively_movable const& obj)          &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    destructively_movable&  operator=(destructively_movable     && obj)          &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    destructively_movable&  operator=(destructively_movable const& obj) volatile &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    destructively_movable&  operator=(destructively_movable     && obj) volatile &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+
+    destructively_movable&& operator=(destructively_movable const& obj)          && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    destructively_movable&& operator=(destructively_movable     && obj)          && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    destructively_movable&& operator=(destructively_movable const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    destructively_movable&& operator=(destructively_movable     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
 
     void is_valid(bool value)                noexcept {        m_isValid = value; }
     void is_valid(bool value)       volatile noexcept {        m_isValid = value; }
@@ -290,6 +304,7 @@ struct is_destructively_movable : std::false_type {};
 template <typename T, typename I>
 struct is_destructively_movable<destructively_movable<T, I>> : std::true_type {};
 
+namespace detail {
 template <typename Contained, typename Derived>
 class destructively_movable_impl
 {
@@ -311,7 +326,7 @@ class destructively_movable_impl
         );
     }
 
-    template <typename T> struct bare_type_impl                                { using type = T; };
+    template <typename T> struct bare_type_impl                           { using type = T; };
     template <typename T> struct bare_type_impl<destructively_movable<T>> { using type = T; };
 
     // Strips and extract the wrapped type or if not wrapped, just return the type.
@@ -319,7 +334,25 @@ class destructively_movable_impl
     
     template <typename T> using  fwd_to_bare_type_t = fwd_type_t<T, bare_t<T>>;
 
+    template <typename T>
+    static void clear_is_valid_if_moving_distructively_movable(T&& value) noexcept
+    {
+        if constexpr (is_destructively_movable<T>::value)
+        {
+            // NOTE: is_destructively_movable<first_element>::value implies
+            //       that first_element is an rvalue, otherwise it would be
+            //       an lvalue reference, which would fail to match.
+            if constexpr (std::is_same<Contained, typename T::type>::value)
+            {
+                // Operation was a move on a destructively_movable object.
+                value.is_valid(false);
+            }
+        }
+    }
+    destructively_movable_impl(destructively_movable_impl const&) = delete;
+    destructively_movable_impl& operator=(destructively_movable_impl const&) = delete;
 public:
+
     using type = Contained;
     destructively_movable_impl(default_empty const& obj) noexcept {
         is_valid(false);
@@ -341,8 +374,6 @@ public:
     {
         assert(is_valid());
     }
-
-    destructively_movable_impl(destructively_movable_impl const&) = delete;
 
     // Does emplace construction of T
     // If going to accept derived types, then the size of objects must be the same.
@@ -398,99 +429,74 @@ public:
         }
     }
 
-    // Does emplace construction of Contained, including copy/move construction.
+    // Forward the heavy lifting to the constructors
     template <typename...Ts>
-    auto& construct(Ts&&...construct) noexcept(noexcept(
-            Derived(emplace<Contained>(std::forward<Ts>(construct)...))
+    Derived& construct(Ts&&...construct) noexcept(noexcept(
+            Derived(std::forward<Ts>(construct)...)
         ))
     {
         OUTPUT_FUNC;
         assert(!is_valid());
-        return *new (this) Derived(emplace<Contained>(std::forward<Ts>(construct)...));
+        return *new (this) Derived(std::forward<Ts>(construct)...);
     }
-
-    // Does emplace construction of T
-    // If going to accept derived types, then the size of objects must be the same.
-    template <typename T, typename...Ts
-        , std::enable_if_t<
-            std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
-        , int> = 0>
-    auto& construct(emplace_params<T, Ts...>&& construct) noexcept(noexcept(
-        construct.uninitialized_construct(m_storage)
-    ))
-    {
-        OUTPUT_FUNC;
-        assert(!is_valid());
-        return *new (this) Derived(std::move(construct));
-    }
-
-    // construct does emplace construction of T
-    // If going to accept derived types, then the size of objects must be the same.
-    template <typename T, typename...Ts
-        , std::enable_if_t<
-            std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
-        , int> = 0>
-    auto& construct(emplace_params<T, Ts...> const& construct) noexcept(
-        noexcept(construct.uninitialized_construct(m_storage))
-    )
-    {
-        OUTPUT_FUNC;
-        assert(!is_valid());
-        return *new (this) Derived(          construct );
-    }
-
-    destructively_movable_impl& operator=(destructively_movable_impl const&) = delete;
-
 private:
-
-    template <typename T>
-    static void clear_is_valid_if_moving_distructively_movable(T&& value) noexcept
-    {
-        if constexpr (is_destructively_movable<T>::value)
-        {
-            // NOTE: is_destructively_movable<first_element>::value implies
-            //       that first_element is an rvalue, otherwise it would be
-            //       an lvalue reference, which would fail to match.
-            if constexpr (std::is_same<Contained, typename T::type>::value)
-            {
-                // Operation was a move on a destructively_movable object.
-                value.is_valid(false);
-            }
-        }
-    }
-
     template <typename T, typename U>
     static auto&& assign(T&& lhs, U&& rhs)
-        //noexcept(
-        //    noexcept(std::forward<T>(lhs).object().operator=(std::forward<U>(rhs)))
-        //    && noexcept(lhs.construct(std::forward<U>(rhs)))
-        //)
+        noexcept(
+            noexcept(std::forward<T>(lhs).object().operator=(std::forward<U>(rhs)))
+            // Weird.  Enabling the next line results in the error msg:
+            //
+            //   1>destructive_move.cpp(437): error : exception specification of 'destructively_movable' uses itself
+            //
+            //This sounds like there is a call cycle which I don't see.
+
+            //&& noexcept(lhs.construct(std::forward<U>(rhs)))
+        )
     {
-        if (lhs.is_valid()) {
-            if constexpr (is_destructively_movable<U>::value) {
-                // Only assign something if there is something to assign.
-                if (rhs.is_valid()) {
-                    std::forward<T>(lhs).object().operator=(std::forward<U>(rhs));
-                }
-            }
-            else {
+        if constexpr (is_destructively_movable<U>::value)
+        {
+            // Only assign something if there is something to assign.
+            if (rhs.is_valid()) {
                 std::forward<T>(lhs).object().operator=(std::forward<U>(rhs));
             }
         }
         else {
-            lhs.construct(std::forward<U>(rhs));
+            if (lhs.is_valid()) {
+                std::forward<T>(lhs).object().operator=(std::forward<U>(rhs));
+            }
+            else {
+                lhs.construct(std::forward<U>(rhs));
+            }
         }
         assert(!is_destructively_movable<U>::value || lhs.is_valid());
+        //INTEROGATE_TYPE(                (lhs));
+        //INTEROGATE_TYPE( std::forward<T>(lhs));
         clear_is_valid_if_moving_distructively_movable(std::forward<U>(rhs));
-        return std::forward<T>(lhs);
+        return fwd_like<T>(static_cast<Derived&>(lhs));
     }
 
 public:
-    template <typename T> Derived&& operator=(T&& rhs)          &  noexcept(noexcept(assign(         (*this), std::forward<T>(rhs)))) { return assign(         (*this), std::forward<T>(rhs)); }
-    template <typename T> Derived&& operator=(T&& rhs) volatile &  noexcept(noexcept(assign(         (*this), std::forward<T>(rhs)))) { return assign(         (*this), std::forward<T>(rhs)); }
+    // Wasted hours trying to do:
+    //   return assign(static_cast<Derived&>(*this), std::forward<T>(rhs));
+    // Seems that the compiler gets confused and thinks that assign() returns
+    // Contained for some reason.  Tried to use following signatures:
+    //
+    //    template <typename T, typename U> auto&&         assign(T&& lhs, U&& rhs);
+    //    template <typename T, typename U> decltype(auto) assign(T&& lhs, U&& rhs);
+    //    template <typename T, typename U> auto           assign(T&& lhs, U&& rhs) -> Derived&&;
+    //
+    // While returning std::forward<T>(lhs).  Interogating the type inside the
+    // function revaled that it was what was expected (equivilant to Derived).
+    // Interogating the actual returned type gave the equivilant of Contained.
+    // Even when using the debugger, auto shows return type as
+    // destructively_movable_impl reference not destructively_movable reference.
+    //
+    // Gave up and returned a static_cast to Derived& instead, which worked.
+    template <typename T> auto&  operator=(T&& rhs)          &  { assign(         (*this), std::forward<T>(rhs)); return static_cast<Derived& >(*this); }
+    template <typename T> auto&  operator=(T&& rhs) volatile &  { assign(         (*this), std::forward<T>(rhs)); return static_cast<Derived& >(*this); }
     // Does it even make sense to assign to a rvalue?  Limited value?
-    template <typename T> Derived&& operator=(T&& rhs)          && noexcept(noexcept(assign(std::move(*this), std::forward<T>(rhs)))) { return assign(std::move(*this), std::forward<T>(rhs)); }
-    template <typename T> Derived&& operator=(T&& rhs) volatile && noexcept(noexcept(assign(std::move(*this), std::forward<T>(rhs)))) { return assign(std::move(*this), std::forward<T>(rhs)); }
+    template <typename T> auto&& operator=(T&& rhs)          && { assign(std::move(*this), std::forward<T>(rhs)); return static_cast<Derived&&>(*this); }
+    template <typename T> auto&& operator=(T&& rhs) volatile && { assign(std::move(*this), std::forward<T>(rhs)); return static_cast<Derived&&>(*this); }
 
     void destruct()
     {
@@ -603,7 +609,11 @@ public:
 #undef IS_DOWNCAST
 };
 
+} //namespace detail {
+
+static int i = 0;
 struct X {
+    int m_i = ++i;
     X()  { std::cout << "X constructed\n"; }
     ~X() { std::cout << "X destructed\n"; }
 
@@ -617,6 +627,596 @@ struct X {
     void test() const          &  { std::cout << "const          lvalue\n"; }
     void test() const volatile &  { std::cout << "const volatile lvalue\n"; }
 };
+
+#include <vector>
+#include <algorithm>
+#include <boost/circular_buffer.hpp>
+template <typename T, typename Allocator   = std::allocator<T>>
+struct augmented_vector
+{
+    struct is_valid;
+
+    using objects_t              = std::vector<destructively_movable<T, is_valid>, Allocator>;
+
+    using value_type             = typename objects_t::value_type;
+    using allocator_type         = Allocator;
+    using size_type              = typename objects_t::size_type;
+    using difference_type        = typename objects_t::difference_type;
+    using reference              = typename objects_t::reference;
+    using const_reference        = typename objects_t::const_reference;
+    using pointer                = typename objects_t::pointer;
+    using const_pointer          = typename objects_t::const_pointer;
+    using iterator               = typename objects_t::iterator;
+    using const_iterator         = typename objects_t::const_iterator;
+    using reverse_iterator       = typename objects_t::reverse_iterator;
+    using const_reverse_iterator = typename objects_t::const_reverse_iterator;
+
+    std::vector<bool> external_valid_flags;
+    objects_t objects;
+
+    static constexpr int max_cached = 8;
+    struct local_vector_info
+    {
+        augmented_vector* vector;
+        iterator begin, end;
+        bool allow_write;
+    };
+
+    static std::vector<local_vector_info> all_augmented_vectors;
+    static boost::circular_buffer<local_vector_info> cached_augmented_vectors;
+    static int cached_augmented_vectors_stored;
+    struct is_valid
+    {
+        std::pair<augmented_vector*, bool> get_this(destructively_movable<T>* pObject)
+        {
+            auto match = [](local_vector_info& lvi) {
+                return lvi.vector->objects.data() < pObject
+                    && pObject < lvi.vector->objects.data() + lvi.vector->objects.size();
+            };
+            auto found = std::find_if(
+                augmented_vector::cached_augmented_vectors.rbegin()
+                , augmented_vector::cached_augmented_vectors.end()
+                , match
+            );
+            if (found == augmented_vector::cached_augmented_vectors.rend())
+            {
+                auto found = std::lower_bound(
+                    augmented_vector::all_augmented_vectors.begin()
+                    , augmented_vector::all_augmented_vectors.end()
+                    , pObject
+                    , match
+                );
+                assert(found != augmented_vector::all_augmented_vectors.end());
+                return { found->vector, found->allow_write };
+            }
+            assert(found != augmented_vector::cached_augmented_vectors.end());
+            augmented_vector::cached_augmented_vectors.push_back(*found);
+            return { found->vector, found->allow_write };
+        }
+
+        bool operator()(destructively_movable<T>* pObject) const
+        {
+            auto[this_, allow_write] = get_this(pObject);
+            return external_valid_flags[std::distance(this_->objects, pObject)];
+        }
+        void operator()(destructively_movable<T>* pObject, bool value)
+        {
+            auto[this_, allow_write] = get_this(pObject);
+            if (allow_write) {
+                external_valid_flags[std::distance(this_->objects, pObject)] = value;
+            }
+        }
+    };
+
+    template <typename C>
+    auto find_in_list(C& container)
+    {
+        auto found = std::find_if(
+            container.begin()
+            , container.end()
+            , [this](local_vector_info& lvi) {
+                return lvi.vector == this;
+            });
+        return std::make_pair(found, (found != container.end()));
+    }
+
+    template <typename C>
+    void remove_from_list(C& container)
+    {
+        auto[it, found] = find_in_list(container);
+        if (found) {
+            container.erase(found);
+        }
+    }
+
+    void remove_from_list()
+    {
+        remove_from_list(all_augmented_vectors);
+        remove_from_list(cached_augmented_vectors);
+    }
+
+    template <typename C>
+    void adjust_in_list(C& container)
+    {
+        auto[it, found] = find_in_list(container);
+        if (found) {
+            it->begin = begin();
+            it->end   = begin() + capacity();
+        }
+    }
+
+    void adjust_in_list()
+    {
+        adjust_in_list(all_augmented_vectors);
+        adjust_in_list(cached_augmented_vectors);
+    }
+
+    bool cmp_vector_info(local_vector_info const& lhs, local_vector_info const& rhs)
+    {
+        return lhs.begin < rhs.end;// && lhs.end < rhs.end;
+    }
+
+    typename decltype(all_augmented_vectors)::iterator find_in_all_augmented_vectors()
+    {
+        return std::lower_bound(all_augmented_vectors.begin(), all_augmented_vectors.end()
+            , lvi
+            , cmp_vector_info);
+    }
+
+    void add_to_list()
+    {
+        local_vector_info lvi = { this, begin(), end(), true };
+        auto found = find_in_all_augmented_vectors();
+        if (found != all_augmented_vectors.end()) {
+            all_augmented_vectors.insert(found, lvi);
+        }
+    }
+
+    void reposition_in_all_augmented_vectors(typename decltype(all_augmented_vectors)::iterator it_item)
+    {
+        assert(all_augmented_vectors.size() != 0 && it_item != all_augmented_vectors.end());
+        if (it_item + 1 != all_augmented_vectors.end()) {
+            if (it_item[1].begin > end()) {
+                auto new_location = std::lower_bound(all_augmented_vectors.begin(), it_item, *it_item, cmp_vector_info);
+                // rotate
+            }
+        }
+        else if (it_item != all_augmented_vectors.begin()) {
+            if (begin() < it_item[-1].end) {
+                auto new_location = std::lower_bound(it_item + 1, all_augmented_vectors.end(), *it_item, cmp_vector_info);
+                // rotate
+
+            }
+        }
+    }
+    // ==] Main [==============================================================
+    augmented_vector() noexcept(noexcept(Allocator()))
+        : objects()
+        , external_valid_flags()
+    {
+        allow_write = true;
+    }
+
+    explicit augmented_vector(const Allocator& alloc) noexcept
+        : objects(alloc)
+        , external_valid_flags()
+    {
+        allow_write = true;
+    }
+
+    augmented_vector(size_type count,
+        const T& value,
+        const Allocator& alloc = Allocator())
+        : objects(count, value, alloc)
+        , external_valid_flags(count, true)
+    {
+        allow_write = true;
+    }
+
+    explicit augmented_vector(size_type count, const Allocator& alloc = Allocator())
+        : objects(count, alloc)
+        , external_valid_flags(count, true)
+    {
+        allow_write = true;
+    }
+
+    template< class InputIt >
+    augmented_vector(InputIt first, InputIt last, const Allocator& alloc = Allocator())
+        : objects(first, last, alloc)
+        , external_valid_flags(objects.size(), true)
+    {
+        allow_write = true;
+    }
+
+    augmented_vector(const augmented_vector& other, const Allocator& alloc)
+        : objects(other.objects)
+        , external_valid_flags(other.external_valid_flags)
+    {
+        allow_write = true;
+    }
+
+    augmented_vector(augmented_vector&& other) noexcept
+        : objects(std::move(other.objects))
+        , external_valid_flags(std::move(other.external_valid_flags))
+    {
+        allow_write = true;
+    }
+
+    augmented_vector(augmented_vector&& other, const Allocator& alloc)
+        : objects(std::move(other.objects), alloc)
+        , external_valid_flags(std::move(other.external_valid_flags))
+    {
+        allow_write = true;
+    }
+
+    augmented_vector(std::initializer_list<T> init, const Allocator& alloc = Allocator())
+        : objects(init, alloc)
+        , external_valid_flags(init.size(), true)
+    {
+        allow_write = true;
+    }
+
+    ~augmented_vector()
+    {
+        allow_write = false;
+        remove_from_list();
+    }
+
+    augmented_vector& operator=(const augmented_vector& other)
+    {
+        objects = other.objects;
+        external_valid_flags = other.external_valid_flags;
+    }
+
+    augmented_vector& operator=(augmented_vector&& other) noexcept(
+        std::allocator_traits<Allocator>::propagate_on_container_move_assignment::value
+        || std::allocator_traits<Allocator>::is_always_equal::value
+    )
+    {
+        objects = std::move(other.objects);
+        external_valid_flags = std::move(other.external_valid_flags);
+    }
+
+    augmented_vector& operator=(std::initializer_list<T> ilist)
+    {
+        assign(ilist);
+    }
+
+    void assign(size_type count, const T& value)
+    {
+        objects.assign(count, value);
+        external_valid_flags.assign(count, true);
+    }
+
+    template< class InputIt >
+    void assign(InputIt first, InputIt last)
+    {
+        objects.assign(first, last);
+        external_valid_flags.assign(objects.size(), true);
+    }
+
+    void assign(std::initializer_list<T> ilist)
+    {
+        objects.assign(ilist);
+        external_valid_flags.assign(ilist.size(), true);
+    }
+
+    allocator_type get_allocator() const
+    {
+        return objects.get_allocator();
+    }
+
+    // ==] Element access [====================================================
+    reference       at(size_type pos)
+    {
+        return objects.at(pos);
+    }
+
+    const_reference at(size_type pos) const
+    {
+        return objects.at(pos);
+    }
+
+    reference       operator[](size_type pos)
+    {
+        return objects[pos];
+    }
+
+    const_reference operator[]( size_type pos ) const
+    {
+        return objects[pos];
+    }
+
+    reference front()
+    {
+        return objects.front();
+    }
+
+    const_reference front() const
+    {
+        return objects.front();
+    }
+
+    reference back()
+    {
+        return objects.back();
+    }
+
+    const_reference back() const
+    {
+        return objects.back();
+    }
+
+    T* data() noexcept
+    {
+        return objects.data();
+    }
+
+    const T* data() const noexcept
+    {
+        return objects.data();
+    }
+
+    // ==] Iterators [=========================================================
+    auto   begin()       noexcept { return objects.  begin(); }
+    auto  cbegin() const noexcept { return objects. cbegin(); }
+    auto  rbegin()       noexcept { return objects. rbegin(); }
+    auto crbegin() const noexcept { return objects.crbegin(); }
+
+    auto     end()       noexcept { return objects.    end(); }
+    auto    cend() const noexcept { return objects.   cend(); }
+    auto    rend()       noexcept { return objects.   rend(); }
+    auto   crend() const noexcept { return objects.  crend(); }
+
+// ==] Capacity [==========================================================
+    bool empty() noexcept { return objects.empty(); }
+    size_type size() noexcept { return objects.size(); }
+    size_type max_size() noexcept { return objects.max_size(); }
+    size_type capacity() noexcept { return objects.capacity(); }
+    void reserve(size_type new_cap) {
+        bool resized = (new_cap > capacity());
+        objects.reserve(new_cap);
+        external_valid_flags.reserve(new_cap);
+        if (resized) {
+            adjust_in_list();
+        }
+    }
+
+    void shrink_to_fit()
+    {
+        if (size() < capacity())
+        {
+            objects.shrink_to_fit();
+            external_valid_flags.shrink_to_fit();
+            adjust_in_list();
+        }
+    }
+
+    // ==] Modifiers [=========================================================
+    void clear() noexcept
+    {
+        external_valid_flags.clear();
+        objects.clear();
+    }
+    enum class adding { no, yes };
+    enum class single { no, yes };
+    template <adding Adding, single Single>
+    struct adjust
+    {
+        augmented_vector& v;
+        size_type offset;
+        iterator old_begin;
+        size_type old_size;
+        adjust(augmented_vector& v, const_iterator it)
+            : v(v)
+            , offset(std::distance(v.cbegin(), it))
+            , old_begin(v.begin())
+            , old_size(v.size())
+        {}
+
+        ~adjust() noexcept(false)
+        {
+            if constexpr (Adding == adding::yes) {
+                try {
+                    if constexpr (Single == single::yes) {
+                        v.external_valid_flags.insert(v.external_valid_flags.begin() + offset, true);
+                    }
+                    else {
+                        v.external_valid_flags.insert(v.external_valid_flags.begin() + offset, v.size() - old_size, true);
+                    }
+                }
+                catch (...) { // FIXME
+                    // TODO: What should be done if insert throws?
+                    //       Erase last elements that were inserted, till the size matches?
+                    v.objects.erase(v.objects.begin() + offset, v.objects.begin() + (v.size() - old_size));
+                    if (v.begin() != old_begin) {
+                        v.adjust_in_list();
+                    }
+                    throw;
+                }
+                if (v.begin() != old_begin) {
+                    v.adjust_in_list();
+                }
+            }
+            else {
+                try {
+                    if constexpr (Single == single::yes) {
+                        v.external_valid_flags.erase(v.external_valid_flags.begin() + offset);
+                    }
+                    else {
+                        v.external_valid_flags.erase(v.external_valid_flags.begin() + offset, v.external_valid_flags.begin() + (old_size - v.size()));
+                    }
+                    assert(v.begin() == old_begin);
+                }
+                catch (...) { // FIXME
+                    // TODO: What should be done if erase throws?  Can it throw?
+                    assert(false);  // I think the throw comes from the objects, not the erasing.  A bool doesn't throw, so should be fine.
+                    throw;
+                }
+            }
+        }
+    };
+
+    iterator insert(const_iterator pos, const T&& value)
+    {
+        adjust<adding::yes, single::yes> adjust_(*this, pos);
+        return objects.insert(pos, std::move(value));
+    }
+
+    iterator insert(const_iterator pos, const T& value)
+    {
+        adjust<adding::yes, single::yes> adjust_(*this, pos);
+        return objects.insert(pos,           value );
+    }
+
+    iterator insert(const_iterator pos, size_type count, const T& value)
+    {
+        adjust<adding::yes, single::yes> adjust_(*this, pos);
+        return objects.insert(pos, count, value);
+    }
+
+    template< class InputIt >
+    iterator insert(const_iterator pos, InputIt first, InputIt last)
+    {
+        adjust<adding::yes, single::no> adjust_(*this, pos);
+        return objects.insert(pos, first, last);
+    }
+
+    iterator insert(const_iterator pos, std::initializer_list<T> ilist)
+    {
+        adjust<adding::yes, single::no> adjust_(*this, pos);
+        return objects.insert(pos, ilist);
+    }
+
+    template< class... Args > 
+    iterator emplace(const_iterator pos, Args&&... args)
+    {
+        adjust<adding::yes, single::yes> adjust_(*this, pos);
+        return objects.emplace(pos, std::forward<Args>(args)...);
+    }
+
+    iterator erase(const_iterator pos)
+    {
+        adjust<adding::no, single::yes> adjust_(*this, pos);
+        return objects.erase(pos);
+    }
+
+    iterator erase(const_iterator first, const_iterator last)
+    {
+        adjust<adding::no, single::no> adjust_(*this, pos);
+        return objects.erase(first, last);
+    }
+
+    void push_back(const T& value)
+    {
+        adjust<adding::yes, single::yes> adjust_(*this, pos);
+        objects.push_back(value);
+    }
+
+    void push_back( T&& value )
+    {
+        adjust<adding::yes, single::yes> adjust_(*this, pos);
+        objects.push_back(std::move(value));
+    }
+
+    template< class... Args >
+    reference emplace_back(Args&&... args)
+    {
+        adjust<adding::yes, single::yes> adjust_(*this, pos);
+        return objects.emplace_back(std::forward<Args>(args)...);
+    }
+
+    void pop_back()
+    {
+        adjust<adding::no, single::yes> adjust_(*this, pos);
+        objects.pop_back();
+    }
+
+    void resize(size_type count)
+    {
+        std::ptrdiff_t diff = count - capacity();
+        switch (diff)
+        {
+        case -1:
+            {
+                adjust<adding::no, single::yes> adjust_;
+                objects.resize(count);
+            }
+            break;
+        case 0:
+            break;
+        case 1:
+            {
+                adjust<adding::yes, single::yes> adjust_;
+                objects.resize(count);
+            }
+            break;
+        default:
+            if (diff < 0) {
+                adjust<adding::no, single::no> adjust_;
+                objects.resize(count);
+            }
+            else
+            {
+                adjust<adding::yes, single::no> adjust_;
+                objects.resize(count);
+            }
+            break;
+        }
+    }
+
+    void resize(size_type count, const value_type& value)
+    {
+        std::ptrdiff_t diff = count - capacity();
+        switch (diff)
+        {
+        case -1:
+            {
+                adjust<adding::no, single::yes> adjust_;
+                objects.resize(count, value);
+            }
+            break;
+        case 0:
+            break;
+        case 1:
+            {
+                adjust<adding::yes, single::yes> adjust_;
+                objects.resize(count, value);
+            }
+            break;
+        default:
+            if (diff < 0) {
+                adjust<adding::no, single::no> adjust_;
+                objects.resize(count, value);
+            }
+            else
+            {
+                adjust<adding::yes, single::no> adjust_;
+                objects.resize(count, value);
+            }
+            break;
+        }
+    }
+
+    void swap( augmented_vector& other ) noexcept(
+        std::allocator_traits<Allocator>::propagate_on_container_swap::value
+        || std::allocator_traits<Allocator>::is_always_equal::value
+    )
+    {
+        swap(objects, other.objects);
+        swap(external_valid_flags, other.external_valid_flags);
+    }
+};
+
+template <typename T, typename Allocator   /*= std::allocator<T>*/>
+std::vector<typename augmented_vector<T, Allocator>::local_vector_info> augmented_vector<T, Allocator>::all_augmented_vectors;
+
+template <typename T, typename Allocator   /*= std::allocator<T>*/>
+boost::circular_buffer<typename augmented_vector<T, Allocator>::local_vector_info> augmented_vector<T, Allocator>::cached_augmented_vectors(8);
+
+template <typename T, typename Allocator   /*= std::allocator<T>*/>
+int augmented_vector<T, Allocator>::cached_augmented_vectors_stored = 0;
+
 int main()
 {
     destructively_movable<X> x;
@@ -650,7 +1250,11 @@ int main()
     static_cast<destructively_movable<X> const volatile &&>(x)->test();
 
     destructively_movable<X> x1(std::move(x));
+    destructively_movable<X> x2;
     x1->test();
+    x1 = x2;
+    x1 = std::move(x2);
+
     std::cout << "Hello World!\n";
 }
 
