@@ -8,7 +8,8 @@ struct X {
     int m_i = ++i;
     X()           { std::cout << "X " << (void*)this << " default constructed\n"; }
     X(X const &x) { std::cout << "X " << (void*)this << "    copy constructed\n"; }
-   // X(X      &&x) { std::cout << "X " << (void*)this << "    move constructed\n"; }
+    //FIXME: Enabling next line fails to compile.
+    //X(X      &&x) { std::cout << "X " << (void*)this << "    move constructed\n"; }
     ~X()          { std::cout << "X " << (void*)this << "          destructed\n"; }
 
     void test()                && { std::cout << (void*)this << "                rvalue\n"; }
