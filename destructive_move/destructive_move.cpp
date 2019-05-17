@@ -6,19 +6,22 @@
 static int i = 0;
 struct X {
     int m_i = ++i;
-    X()  { std::cout << "X constructed\n"; }
-    ~X() { std::cout << "X destructed\n"; }
+    X()           { std::cout << "X " << (void*)this << " default constructed\n"; }
+    X(X const &x) { std::cout << "X " << (void*)this << "    copy constructed\n"; }
+   // X(X      &&x) { std::cout << "X " << (void*)this << "    move constructed\n"; }
+    ~X()          { std::cout << "X " << (void*)this << "          destructed\n"; }
 
-    void test()                && { std::cout << "               rvalue\n"; }
-    void test()       volatile && { std::cout << "      volatile rvalue\n"; }
-    void test() const          && { std::cout << "const          rvalue\n"; }
-    void test() const volatile && { std::cout << "const volatile rvalue\n"; }
+    void test()                && { std::cout << (void*)this << "                rvalue\n"; }
+    void test()       volatile && { std::cout << (void*)this << "       volatile rvalue\n"; }
+    void test() const          && { std::cout << (void*)this << " const          rvalue\n"; }
+    void test() const volatile && { std::cout << (void*)this << " const volatile rvalue\n"; }
 
-    void test()                &  { std::cout << "               lvalue\n"; }
-    void test()       volatile &  { std::cout << "      volatile lvalue\n"; }
-    void test() const          &  { std::cout << "const          lvalue\n"; }
-    void test() const volatile &  { std::cout << "const volatile lvalue\n"; }
+    void test()                &  { std::cout << (void*)this << "                lvalue\n"; }
+    void test()       volatile &  { std::cout << (void*)this << "       volatile lvalue\n"; }
+    void test() const          &  { std::cout << (void*)this << " const          lvalue\n"; }
+    void test() const volatile &  { std::cout << (void*)this << " const volatile lvalue\n"; }
 };
+
 
 int main()
 {
