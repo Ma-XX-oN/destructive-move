@@ -4,28 +4,51 @@
 #include <iostream>
 
 static int i = 0;
+
+struct X;
+template <typename T, std::enable_if_t<std::is_same_v<afh::remove_cvref_t<T>, X>, int> = 0>
+std::ostream& operator<<(std::ostream& os, T const& obj);
+
 struct X {
     int m_i = ++i;
-    X()           { std::cout << "X " << (void*)this << " default constructed\n"; }
-    X(X const &x) { std::cout << "X " << (void*)this << "    copy constructed\n"; }
-    //FIXME: Enabling next line fails to compile.
-    //X(X      &&x) { std::cout << "X " << (void*)this << "    move constructed\n"; }
-    ~X()          { std::cout << "X " << (void*)this << "          destructed\n"; }
+    X()           { std::cout << "X default constructed " << *this << "\n"; }
+    
+    X(X const &x) { std::cout << "X    copy constructed " << *this << "\n"; }
+    X& operator=(X const& x) {
+        std::cout             << "X       copy assigned " << *this << " = " << x << "\n";
+        m_i = x.m_i;
+        return *this;
+    }
 
-    void test()                && { std::cout << (void*)this << "                rvalue\n"; }
-    void test()       volatile && { std::cout << (void*)this << "       volatile rvalue\n"; }
-    void test() const          && { std::cout << (void*)this << " const          rvalue\n"; }
-    void test() const volatile && { std::cout << (void*)this << " const volatile rvalue\n"; }
+    X(X      &&x) { std::cout << "X    move constructed " << *this << "\n"; }
+    X& operator=(X     && x) {
+        std::cout             << "X       move assigned " << *this << " = " << x << "\n";
+        m_i = x.m_i;
+        return *this;
+    }
+    
+    ~X()          { std::cout << "X           destructed " << *this << "\n"; }
 
-    void test()                &  { std::cout << (void*)this << "                lvalue\n"; }
-    void test()       volatile &  { std::cout << (void*)this << "       volatile lvalue\n"; }
-    void test() const          &  { std::cout << (void*)this << " const          lvalue\n"; }
-    void test() const volatile &  { std::cout << (void*)this << " const volatile lvalue\n"; }
+    void test()                && { std::cout << "               rvalue " << *this << "\n"; }
+    void test()       volatile && { std::cout << "      volatile rvalue " << *this << "\n"; }
+    void test() const          && { std::cout << "const          rvalue " << *this << "\n"; }
+    void test() const volatile && { std::cout << "const volatile rvalue " << *this << "\n"; }
+
+    void test()                &  { std::cout << "               lvalue " << *this << "\n"; }
+    void test()       volatile &  { std::cout << "      volatile lvalue " << *this << "\n"; }
+    void test() const          &  { std::cout << "const          lvalue " << *this << "\n"; }
+    void test() const volatile &  { std::cout << "const volatile lvalue " << *this << "\n"; }
 };
 
+template <typename T, std::enable_if_t<std::is_same_v<afh::remove_cvref_t<T>, X>, int> /*= 0*/>
+std::ostream& operator<<(std::ostream& os, T const& obj)
+{
+    return os << "(*" << ((void*)&obj) << " = { " << obj.m_i << " })";
+}
 
 int main()
 {
+#if 0 // isolating down to applicable code for debugging failure
     afh::destructively_movable<X> x;
     std::cout << "\nlvalues\n";
     x->test();
@@ -56,11 +79,16 @@ int main()
     static_cast<afh::destructively_movable<X> const          &&>(x)->test();
     static_cast<afh::destructively_movable<X> const volatile &&>(x)->test();
 
-    afh::destructively_movable<X> x1(std::move(x));
+    //afh::destructively_movable<X> z1; X x1(X{});// (std::move(x));
+    //afh::destructively_movable<X> z2; X x2;
+    //x1.test();
+#endif
+
+    afh::destructively_movable<X> x1;
     afh::destructively_movable<X> x2;
     x1->test();
     x1 = x2;
-    x1 = std::move(x2);
+//    x1 = std::move(x2);
 
     std::cout << "Hello World!\n";
 }

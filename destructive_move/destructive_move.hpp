@@ -38,7 +38,7 @@ struct emplace_params
     {}
 
     auto* uninitialized_construct(void* storage)
-        noexcept(noexcept(T(std::forward<Ts>(std::declval<Ts>())...)))
+//        noexcept(noexcept(T(std::forward<Ts>(std::declval<Ts>())...)))
     {
         return std::apply([storage](auto &&... args) {
             return new (storage) T(std::forward<Ts>(args)...);
@@ -570,7 +570,7 @@ private:
     template <typename T, typename U>
     static auto&& assign(T&& lhs, U&& rhs)
         noexcept(
-            noexcept(std::forward<T>(lhs).object().operator=(std::forward<U>(rhs)))
+            noexcept(std::forward<T>(lhs).object() = std::forward<U>(rhs).object())
             && noexcept(lhs.construct(std::forward<U>(rhs)))
         )
     {
@@ -578,19 +578,26 @@ private:
         {
             // Only assign something if there is something to assign.
             if (rhs.is_valid()) {
-                std::forward<T>(lhs).object().operator=(std::forward<U>(rhs));
+                // Assign the underlying lhs object to the underlying rhs object.
+                // Don't use object().operator=(...) because even if Contained is
+                // an object that has an operator=() member function, the compiler
+                // seems to get confused.  However, generally, it's limiting the
+                // type as types can be assignable, but not have an operator=(...)
+                // function, such as primitive types.
+                std::forward<T>(lhs).object() = std::forward<U>(rhs).object();
+                move_from_destructively_movable_implies_no_longer_valid(std::forward<U>(rhs));
             }
         }
         else {
             if (lhs.is_valid()) {
-                std::forward<T>(lhs).object().operator=(std::forward<U>(rhs));
+                // Assign the underlying lhs object to the rhs object.
+                std::forward<T>(lhs).object() = std::forward<U>(rhs);
             }
             else {
                 lhs.construct(std::forward<U>(rhs));
             }
         }
         assert(!is_destructively_movable<U>::value || lhs.is_valid());
-        move_from_destructively_movable_implies_no_longer_valid(std::forward<U>(rhs));
         return fwd_like<T>(static_cast<Derived&>(lhs));
     }
 
