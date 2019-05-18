@@ -791,7 +791,7 @@ public:
         template <typename U, std::enable_if_t< enabler(const_volatile) , int> = 0>             \
         explicit operator U convert_to_lrvalue () const_volatile convert_from_lrvalue noexcept  \
         {                                                                                       \
-            return fwd_like<U convert_to_lrvalue>(object());                                    \
+            return fwd_like<U convert_to_lrvalue>(const_cast<Contained&>(object()));            \
         }
 
 #define CONVERSION_ALL_CVS(        convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \

@@ -49,10 +49,10 @@ std::ostream& operator<<(std::ostream& os, T const& obj)
 int main()
 {
     afh::destructively_movable<X> x;
-    std::cout << "\nlvalues\n";
+    std::cout << "\n--] lvalues [----------\n";
     x->test();
 
-    std::cout << "\nlvalues\n";
+    std::cout << "\n--] lvalues [----------\n";
     static_cast<X                & >(x).test();
     static_cast<X       volatile & >(x).test();
     static_cast<X const          & >(x).test();
@@ -60,19 +60,19 @@ int main()
     x.destruct();
     x.construct(afh::emplace<X>());
 
-    std::cout << "\nrvalues\n";
+    std::cout << "\n--] rvalues [----------\n";
     static_cast<X                &&>(x).test();
     static_cast<X       volatile &&>(x).test();
     static_cast<X const          &&>(x).test();
     static_cast<X const volatile &&>(x).test();
 
-    std::cout << "\nlvalues\n";
+    std::cout << "\n--] lvalues [----------\n";
     static_cast<afh::destructively_movable<X>                & >(x)->test();
     static_cast<afh::destructively_movable<X>       volatile & >(x)->test();
     static_cast<afh::destructively_movable<X> const          & >(x)->test();
     static_cast<afh::destructively_movable<X> const volatile & >(x)->test();
 
-    std::cout << "\nlvalues\n";
+    std::cout << "\n--] lvalues [----------\n";
     static_cast<afh::destructively_movable<X>                &&>(x)->test();
     static_cast<afh::destructively_movable<X>       volatile &&>(x)->test();
     static_cast<afh::destructively_movable<X> const          &&>(x)->test();
