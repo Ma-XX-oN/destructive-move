@@ -125,7 +125,7 @@ auto&& get(emplace_params<Ts...>& params)
 //=============================================================================
 namespace detail
 {
-    template <typename T, typename Derived>
+    template <typename T>
     class destructively_movable_impl;
 }
 
@@ -139,48 +139,24 @@ struct tombstone_tag {};
 
 //-----------------------------------------------------------------------------
 // template <typename T>
-// struct destructively_movable_trait;
+// struct destructively_movable_traits;
 //
 //  Specifies a default function overload object to mark or get valid state of
 //  type T.  If set to tombstone_tag, then this explictly states that the type
 //  can not be used with a destructively_movable object.
-template <typename T>
-struct destructively_movable_trait
-{
-    using Is_valid = void;
-};
-
-//-----------------------------------------------------------------------------
-// template <typename Contained,
-//   typename Is_valid = typename destructively_movable_trait<Contained>::Is_valid>
-// class destructively_movable;
-//
-// template <typename Contained>
-// class destructively_movable<Contained, void>;
-//
-//  The will create a destructively movable container for an object.  This
-//  means if this object is moved, the container's contents is also moved. Then
-//  the container that was moved from will not call the destructor of its
-//  contained object.  This can have performance benifits if the Contained
-//  destructor has to call other destructors for other objects that it
-//  contains, either iteratively or recersively.
 //
 ////
-// Template Parameters
+// Traits to specialise on
 ////
-//  Contained
-//
-//   This is the type to be contained.
-////
-//  Is_valid
+//  Is_valid (required overloaded function object type)
 //
 //   This is an function object, which contains the following two overloads
-//   (four if using in a volatile context):
+//   (and this doubles if using in a volatile context):
 //
-//     bool operator()(Contained const         *) noexcept;
-//     bool operator()(Contained const volatile*) noexcept;
-//     void operator()(Contained               *, tombstone_tag) noexcept;
-//     void operator()(Contained       volatile*, tombstone_tag) noexcept;
+//     bool operator()(Contained const         &) noexcept;
+//     bool operator()(Contained const volatile&) noexcept;
+//     void operator()(Contained               &, tombstone_tag) noexcept;
+//     void operator()(Contained       volatile&, tombstone_tag) noexcept;
 //
 //   The first two will query the Contained object if it is valid. The second
 //   two explicitly tell the object to put itself into an invalid state. The
@@ -198,12 +174,77 @@ struct destructively_movable_trait
 //   that it might be put in a truely invalid state, where if destructed
 //   without the wrapper, the behaviour would be undefined.
 //
-//   If Is_valid isn't provided, then the compiler will attempt to find one
-//   located in the destructively_movable_trait template class under the type
-//   Is_valid.  If such a trait class is not defined, the defaut type for
-//   Is_valid is void.  That specialisation will append a bool flag to the end
-//   of the type, to be used as the tombstone marker, and this flag will be
-//   updated as needed.
+////
+//  Destruct (optional overloaded function object type)
+//
+//   This is a function object, which contains the following function:
+//
+//     void operator()(Contained         &) noexcept
+//
+//   This really shouldn't be necessary, but some types just don't play that
+//   nice when their guts get ripped out.  Some actually even allocate new
+//   objects (cou-*MicroSoft*-gh! ;)).  Because of this, this workaround is a
+//   necessary evil, and is called when the moved object is supposed to be
+//   destructed.  This allows explicit destruction of those sub-objects in
+//   Contained that don't play nice.
+//
+//   NOTE: Best to destruct the required objects in reverse order that they
+//         execute in the same order like a destructor does.  Not really
+//         necessary, but may prevent possible weirdness.
+//
+//   If Destruct is not provided, then it will be replaced with empty_destruct.
+
+template <typename T>
+struct destructively_movable_traits
+{
+    using Is_valid = void;
+};
+
+//-----------------------------------------------------------------------------
+// Empty destructor function object.
+template <typename T>
+struct empty_destruct
+{
+    void operator()(T*) noexcept {}
+};
+
+//-----------------------------------------------------------------------------
+namespace detail {
+    template <typename T, typename = void>
+    struct destructively_movable_destruct_impl {
+        using type = empty_destruct<T>;
+    };
+
+    template <typename T>
+    struct destructively_movable_destruct_impl<T, typename destructively_movable_traits<T>::Destruct> {
+        using type = typename destructively_movable_traits<T>::Destruct;
+    };
+}
+//-----------------------------------------------------------------------------
+template <typename T>
+using destructively_movable_destruct = typename detail::destructively_movable_destruct_impl<T>::type;
+
+//-----------------------------------------------------------------------------
+template <typename T>
+using destructively_movable_is_valid = typename destructively_movable_traits<T>::Is_valid;
+
+//-----------------------------------------------------------------------------
+// template <typename Contained>
+// class destructively_movable;
+//
+//  The will create a destructively movable container for an object.  This
+//  means if this object is moved, the container's contents is also moved. Then
+//  the container that was moved from will not call the destructor of its
+//  contained object.  This can have performance benifits if the Contained
+//  destructor has to call other destructors for other objects that it
+//  contains, either iteratively or recersively.
+//
+////
+// Template Parameters
+////
+//  Contained (required contained type)
+//
+//   This is the type to be contained.
 //
 ////
 // Constructors
@@ -289,6 +330,14 @@ struct destructively_movable_trait
 //
 
 ////
+// Detail
+////
+//  This library is in responce to the question in CppCon Grill the Committee
+//  https://youtu.be/cH0nJPbMFAY?t=1263 about having destructive moves added
+//  to C++.  I thought that it was an interesting problem, and wondered if
+//  a library solution could be made.
+//
+////
 // Caveats
 ////
 //  It is always better to have the tombstone internal to the object.  Although
@@ -303,19 +352,18 @@ struct destructively_movable_trait
 //  2. A more serious issue is, if after a move, the Contained object retains
 //     any resources.  This can occur if a move is done in terms of a "copy and
 //     swap" or if resources are reallocated to the moved object
-//     (cou-MicroSoft-gh! ;)). In this case, resources will then leak from the
+//     (cou-*MicroSoft*-gh! ;)). In this case, resources will then leak from the
 //     moved from object.
 //
-//  FOR THIS TO WORK WITHOUT LEAKING, the MOVED FROM OBJECT **MUST** NOT RETAIN
-//  **ANY **RESOURCES!  Types can be prevented from being allowed in the
-//  continer
-
-template <typename Contained,
-    typename Is_valid = typename destructively_movable_trait<Contained>::Is_valid>
+//     To get around this issue, one can define a Destruct type trait in the
+//     destructively_movable_traits specialisation for Contained.  This is
+//     really a workaround.  Objects that have been moved, should not create
+//     or hang on to *ANY* resources.
+template <typename Contained, typename Enabled = void>
 class destructively_movable
-    : public detail::destructively_movable_impl<Contained, destructively_movable<Contained, Is_valid>>
+    : public detail::destructively_movable_impl<Contained>
 {
-    using base = detail::destructively_movable_impl<Contained, destructively_movable<Contained, Is_valid>>;
+    using base = detail::destructively_movable_impl<Contained>;
 public:
     // Note: By defining the copy/move constructor/assignment operator members
     //       explicitly like this, the base copy constructor/assignmnt
@@ -340,19 +388,19 @@ public:
     destructively_movable&& operator=(destructively_movable     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
     destructively_movable&& operator=(destructively_movable const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
 
-    void is_valid(bool value)                noexcept { assert(!value);        Is_valid(this, tombstone_tag()); }
-    void is_valid(bool value)       volatile noexcept { assert(!value);        Is_valid(this, tombstone_tag()); }
-    bool is_valid(          ) const          noexcept {                 return Is_valid(this); }
-    bool is_valid(          ) const volatile noexcept {                 return Is_valid(this); }
+    void is_valid(bool value)                noexcept { assert(!value);        Is_valid(*this, tombstone_tag()); }
+    void is_valid(bool value)       volatile noexcept { assert(!value);        Is_valid(*this, tombstone_tag()); }
+    bool is_valid(          ) const          noexcept {                 return Is_valid(*this); }
+    bool is_valid(          ) const volatile noexcept {                 return Is_valid(*this); }
 
     using base::base;
 };
 
 template <typename Contained>
-class destructively_movable<Contained, void>
-    : public detail::destructively_movable_impl<Contained, destructively_movable<Contained, void>>
+class destructively_movable<Contained, destructively_movable_is_valid<Contained>>
+    : public detail::destructively_movable_impl<Contained>
 {
-    using base = detail::destructively_movable_impl<Contained, destructively_movable<Contained, void>>;
+    using base = detail::destructively_movable_impl<Contained>;
     bool m_isValid;
 public:
     // This copy/move constructor is needed because on copying/moving,
@@ -412,10 +460,14 @@ class storage<0>
 {
 };
 
-template <typename Contained, typename Derived>
+template <typename Contained>
 class alignas(Contained) destructively_movable_impl
     : private storage<std::is_empty<Contained>::value ? 0 : sizeof(Contained)>
 {
+    using Derived  = destructively_movable<Contained>;
+    using Is_valid = destructively_movable_is_valid<Contained>;
+    using Destruct = destructively_movable_destruct<Contained>;
+
     Derived                * derived()                noexcept { return static_cast<Derived                *>(this); }
     Derived       volatile * derived()       volatile noexcept { return static_cast<Derived       volatile *>(this); }
     Derived const          * derived() const          noexcept { return static_cast<Derived const          *>(this); }
@@ -425,19 +477,14 @@ class alignas(Contained) destructively_movable_impl
     static auto&& object(U&& this_ref) noexcept
     {
         assert(this_ref.is_valid());
-
-#if 0 // Looks like std::launder isn't working properly atm.
-        return fwd_like<U>(
-            *std::launder(reinterpret_cast<copy_cv_t<std::remove_reference_t<U>, Contained>*>(
-                &this_ref
-            )));
-#else
-        return fwd_like<U>(
-            reinterpret_cast<copy_cv_t<U, Contained>&>(
-                this_ref
-            )
-        );
-#endif
+        return
+            fwd_like<U>(
+                *std::launder(
+                    reinterpret_cast<copy_cv_t<U, Contained*>>(
+                        std::addressof(this_ref)
+                    )
+                )
+            );
     }
 
     static constexpr bool has_external_tombstone = std::is_same<Derived, destructively_movable<Contained, void>>::value;
@@ -587,13 +634,16 @@ public:
             if (is_valid()) {
                 object().~Contained();
             }
+            else {
+                Destruct()(std::launder(reinterpret_cast<Contained*>(this)));
+            }
         }
     }
 
     void destruct()
     {
         assert(is_valid());
-        object().~Contained();
+        this->~destructively_movable_impl();
         if constexpr (has_external_tombstone) {
             is_valid(false);
         }

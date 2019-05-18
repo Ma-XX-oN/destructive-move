@@ -27,7 +27,7 @@ struct X {
         return *this;
     }
     
-    ~X()          { std::cout << "X           destructed " << *this << "\n"; }
+    ~X()          { std::cout << "X          destructed " << *this << "\n"; }
 
     void test()                && { std::cout << "               rvalue " << *this << "\n"; }
     void test()       volatile && { std::cout << "      volatile rvalue " << *this << "\n"; }
@@ -48,7 +48,6 @@ std::ostream& operator<<(std::ostream& os, T const& obj)
 
 int main()
 {
-#if 0 // isolating down to applicable code for debugging failure
     afh::destructively_movable<X> x;
     std::cout << "\nlvalues\n";
     x->test();
@@ -78,11 +77,6 @@ int main()
     static_cast<afh::destructively_movable<X>       volatile &&>(x)->test();
     static_cast<afh::destructively_movable<X> const          &&>(x)->test();
     static_cast<afh::destructively_movable<X> const volatile &&>(x)->test();
-
-    //afh::destructively_movable<X> z1; X x1(X{});// (std::move(x));
-    //afh::destructively_movable<X> z2; X x2;
-    //x1.test();
-#endif
 
     afh::destructively_movable<X> x1;
     afh::destructively_movable<X> x2;

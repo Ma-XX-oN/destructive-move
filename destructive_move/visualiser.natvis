@@ -7,7 +7,7 @@
              ReturnType="bool"
              >
   </Intrinsic>-->
-  <Type Name="afh::detail::destructively_movable_impl&lt;*,*&gt;">
+  <Type Name="afh::detail::destructively_movable_impl&lt;*&gt;">
     <DisplayString>{{is_valid = {is_valid()}, object = {*($T1*)this}}}</DisplayString>
     <Expand>
       <Item Name="is_valid">is_valid()</Item>
@@ -28,13 +28,13 @@
     </Expand>
   </Type>
 
-  <Type Name="afh::detail::destructively_movable_impl&lt;*,afh::destructively_movable&lt;*,void&gt;&gt;">
-    <DisplayString Condition="((destructively_movable&lt;$T2,void&gt;*)this)->m_isValid">{{{*($T1*)((destructively_movable&lt;$T2,void&gt;*)this)}}}</DisplayString>
-    <DisplayString Condition="!((destructively_movable&lt;$T2,void&gt;*)this)->m_isValid">{{* NOT VALID *}}</DisplayString>
+  <Type Name="afh::detail::destructively_movable_impl&lt;*,afh::destructively_movable&lt;*&gt;&gt;">
+    <DisplayString Condition="((destructively_movable&lt;$T2&gt;*)this)->m_isValid">{{{*($T1*)((destructively_movable&lt;$T2&gt;*)this)}}}</DisplayString>
+    <DisplayString Condition="!((destructively_movable&lt;$T2&gt;*)this)->m_isValid">{{* NOT VALID *}}</DisplayString>
     <Expand>
-      <Item Name="is_valid">((destructively_movable&lt;$T2,void&gt;*)this)->m_isValid</Item>
-      <Item Name="object" Condition="((destructively_movable&lt;$T2,void&gt;*)this)->m_isValid">*($T1*)((destructively_movable&lt;$T2,void&gt;*)this)</Item>
-      <Synthetic Name="object" Condition="!((destructively_movable&lt;$T2,void&gt;*)this)->m_isValid">
+      <Item Name="is_valid">((destructively_movable&lt;$T2&gt;*)this)->m_isValid</Item>
+      <Item Name="object" Condition="((destructively_movable&lt;$T2&gt;*)this)->m_isValid">*($T1*)((destructively_movable&lt;$T2&gt;*)this)</Item>
+      <Synthetic Name="object" Condition="!((destructively_movable&lt;$T2&gt;*)this)->m_isValid">
         <DisplayString>* NOT VALID *</DisplayString>
       </Synthetic>
     </Expand>
