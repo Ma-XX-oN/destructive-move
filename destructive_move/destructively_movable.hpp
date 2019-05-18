@@ -296,46 +296,109 @@ using destructively_movable_is_valid = typename destructively_movable_traits<T>:
 //
 //   Calls destructor on Contained object. is_valid() must be true before
 //   calling this function.
-//  
+//
 ////
 // Assignment
 ////
-// template <typename T> auto&& operator=(T&& rhs)          &;
-// template <typename T> auto&& operator=(T&& rhs) volatile &;
+//  template <typename T> auto&& destructively_movable_impl::operator=(T&& rhs)          & ;
+//  template <typename T> auto&& destructively_movable_impl::operator=(T&& rhs) volatile & ;
 //
-//  Assigns l or or rvalue reference object of type T to the lvalue Contained object.
-// 
-// Does it even make sense to assign to a rvalue?  Limited value?
-// template <typename T> auto&& operator=(T&& rhs)          && { return assign(std::move(*this), std::forward<T>(rhs)); }
-// template <typename T> auto&& operator=(T&& rhs) volatile && { return assign(std::move(*this), std::forward<T>(rhs)); }
+//   Assigns lrvalue reference object of type T to the lvalue Contained object.
 //
-//  Assigns l or or rvalue reference object of type T to the rvalue Contained object.
+//  template <typename T> auto&& destructively_movable_impl::operator=(T&& rhs)          &&;
+//  template <typename T> auto&& destructively_movable_impl::operator=(T&& rhs) volatile &&;
+//
+//   Assigns lrvalue reference object of type T to the rvalue Contained object.
 //
 ////
-// is_valid getter/setter
+// Validity (is object constructed)
 ////
-//  destructively_movable_impl::is_valid(bool value)               ;
-//  destructively_movable_impl::is_valid(bool value)       volitile;
+//  void destructively_movable_impl::is_valid()           const          noexcept;
+//  void destructively_movable_impl::is_valid()           const volitile noexcept;
 //
-//   Sets the tombstone state.  If this is an interal tombstone, will only set
-//   to false.  A user defined one should only be an internal tombstone value.
-//   Setting this external to the class is not a good idea.  May make these
-//   private.
+//   Returns if the Contained object is constructed.
 //
-//  destructively_movable_impl::is_valid()           const         ;
-//  destructively_movable_impl::is_valid()           const volitile;
+//  bool destructively_movable_impl::has_been_moved()          noexcept;
+//  bool destructively_movable_impl::has_been_moved() volatile noexcept;
 //
-//   Gets if the Contained object is constructed (valid).
+//   If it's known that the object has actually been moved without the
+//   container's knowledge, then call has_been_moved().  In debug, it will
+//   confirm if the internal state is what it should be.  Further, it will
+//   (in debug and non-debug) update the interal state correctly if required.
 //
+////
+// Access object
+////
+//  auto&& object()                &  noexcept;
+//  auto&& object()       volatile &  noexcept;
+//  auto&& object() const          &  noexcept;
+//  auto&& object() const volatile &  noexcept;
 //
-
+//   Access object as lvalue reference
+//
+//  auto&& object()                && noexcept;
+//  auto&& object()       volatile && noexcept;
+//  auto&& object() const          && noexcept;
+//  auto&& object() const volatile && noexcept;
+//
+//   Access object as rvalue reference
+//
+////
+// Member of operators
+////
+//  auto* operator->()                noexcept;
+//  auto* operator->()       volatile noexcept;
+//  auto* operator->() const          noexcept;
+//  auto* operator->() const volatile noexcept;
+//
+//   Gets the cv qualified pointer to the object address.
+//
+////
+// Address of operators
+////
+//  auto* operator& ()                noexcept;
+//  auto* operator& ()       volatile noexcept;
+//  auto* operator& () const          noexcept;
+//  auto* operator& () const volatile noexcept;
+//
+//   Gets the cv qualified pointer to the object address.
+//
+////
+// Conversion operators
+////
+//  There are 32 conversion operators that convert to the Contained type,
+//  and I'm not going to write them all down here, but here is a table
+//  that shows all the casts that can be done and if they can be done
+//  implicitly, or must be done explicity.  T represents the type type
+//  being converted to.
+//
+//                     | downcast   | is_stronger_or_same  ||           
+//    lrvalue transfer | or upcast  | <T, decltype(*this)> || Cast is   
+//   ==================+============+======================++===========
+//     T&& from &&     | downcast   | true                 ||  implicit 
+//     T&  from &      | downcast   | true                 ||  implicit 
+//     T&& from &&     | upcast     | true                 ||  explicit  // This will not throw. Need a special
+//     T&  from &      | upcast     | true                 ||  explicit  // X_dynamic_cast for that.
+//   ------------------+------------+----------------------++-----------
+//     T&& from &&     | don't care | false                ||  explicit 
+//     T&  from &      | don't care | false                ||  explicit 
+//   ------------------+------------+----------------------++-----------
+//     T&& from &      | don't care | don't care           ||  explicit 
+//     T&  from &&     | don't care | don't care           ||  explicit 
+//
+//  Although I state upcasting in the table, since this is a container with a
+//  specific size, upcasting is only valid if the size of the type casted to is
+//  the same.
+//
 ////
 // Detail
 ////
 //  This library is in responce to the question in CppCon Grill the Committee
-//  https://youtu.be/cH0nJPbMFAY?t=1263 about having destructive moves added
+//  (https://youtu.be/cH0nJPbMFAY?t=1263) about having destructive moves added
 //  to C++.  I thought that it was an interesting problem, and wondered if
-//  a library solution could be made.
+//  a library solution could be made.  So I made this "toy" which got away from
+//  me.  It is based on some other code which I will be also releasing soon,
+//  but as this is done first, I'm prolly going to use this class as it's base.
 //
 ////
 // Caveats
@@ -349,16 +412,24 @@ using destructively_movable_is_valid = typename destructively_movable_traits<T>:
 //     otherwise indeterminate state", this will result in still defined
 //     behaviour, although it will negate the performance improvement.
 //
+//     This performance loss can be regained by calling has_been_moved(), which
+//     will correct the state and ensure that the validity chaecks out
+//     correctly.  It can be called even if it has an internal tombstone
+//     without any performance penelty (with optimisations on). If called when
+//     the contained object has not been moved, will most likely result in
+//     resource leaks, so don't do that.
+//
 //  2. A more serious issue is, if after a move, the Contained object retains
-//     any resources.  This can occur if a move is done in terms of a "copy and
-//     swap" or if resources are reallocated to the moved object
-//     (cou-*MicroSoft*-gh! ;)). In this case, resources will then leak from the
-//     moved from object.
+//     any resources.  This can occur if resources are retained or reallocated
+//     to the moved object (cou-*MicroSoft*-gh! ;)). In this case, resources
+//     will then leak from the moved from object.
 //
 //     To get around this issue, one can define a Destruct type trait in the
-//     destructively_movable_traits specialisation for Contained.  This is
-//     really a workaround.  Objects that have been moved, should not create
-//     or hang on to *ANY* resources.
+//     destructively_movable_traits specialisation for Contained.  This would
+//     have to be implemented for any Contained type that contains types that
+//     have this issue, which is definitely not nice.  This is really a
+//     workaround.  Objects that have been moved, should not create or hang on
+//     to *ANY* resources.  Doing so make a mess on more than one level.
 template <typename Contained, typename Enabled = void>
 class destructively_movable
     : public detail::destructively_movable_impl<Contained>
@@ -650,6 +721,26 @@ public:
         assert(!is_valid());
     }
 
+    void has_been_moved() volatile noexcept
+    {
+        assert( has_external_tombstone &&  is_valid()
+            || !has_external_tombstone && !is_valid());
+        if constexpr (has_external_tombstone) {
+            is_valid(false);
+        }
+        assert(!is_valid());
+    }
+
+    void has_been_moved()          noexcept
+    {
+        assert( has_external_tombstone &&  is_valid()
+            || !has_external_tombstone && !is_valid());
+        if constexpr (has_external_tombstone) {
+            is_valid(false);
+        }
+        assert(!is_valid());
+    }
+
 private:
     // Used tag dispatch rather than function exclusion because heard that it's
     // slightly better compile time performance.  This does make it for a
@@ -717,8 +808,11 @@ public:
     template <typename T> auto&& operator=(T&& rhs)          && { return assign(std::move(*this), std::forward<T>(rhs)); }
     template <typename T> auto&& operator=(T&& rhs) volatile && { return assign(std::move(*this), std::forward<T>(rhs)); }
 
+private:
     void is_valid(bool value)                noexcept {        derived()->is_valid(value); }
     void is_valid(bool value)       volatile noexcept {        derived()->is_valid(value); }
+
+public:
     bool is_valid(          ) const          noexcept { return derived()->is_valid(); }
     bool is_valid(          ) const volatile noexcept { return derived()->is_valid(); }
 
@@ -734,17 +828,17 @@ public:
     auto&& object() const          && noexcept { return object(std::move(*this)); }
     auto&& object() const volatile && noexcept { return object(std::move(*this)); }
 
-    // Member of operators
-    auto operator->()                noexcept { return &object(); }
-    auto operator->()       volatile noexcept { return &object(); }
-    auto operator->() const          noexcept { return &object(); }
-    auto operator->() const volatile noexcept { return &object(); }
+    // Member of operators (TTA: should I use std::addressof instead of &?)
+    auto* operator->()                noexcept { return &object(); }
+    auto* operator->()       volatile noexcept { return &object(); }
+    auto* operator->() const          noexcept { return &object(); }
+    auto* operator->() const volatile noexcept { return &object(); }
 
-    // Address of operators
-    auto operator& ()                noexcept { return &object(); }
-    auto operator& ()       volatile noexcept { return &object(); }
-    auto operator& () const          noexcept { return &object(); }
-    auto operator& () const volatile noexcept { return &object(); }
+    // Address of operators (TTA: should I use std::addressof instead of &?)
+    auto* operator& ()                noexcept { return &object(); }
+    auto* operator& ()       volatile noexcept { return &object(); }
+    auto* operator& () const          noexcept { return &object(); }
+    auto* operator& () const volatile noexcept { return &object(); }
 
     // Conversion operators
     //
