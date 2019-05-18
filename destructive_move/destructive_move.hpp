@@ -38,7 +38,7 @@ struct emplace_params
     {}
 
     auto* uninitialized_construct(void* storage)
-//        noexcept(noexcept(T(std::forward<Ts>(std::declval<Ts>())...)))
+        noexcept(noexcept(T(std::forward<Ts>(std::declval<Ts>())...)))
     {
         return std::apply([storage](auto &&... args) {
             return new (storage) T(std::forward<Ts>(args)...);
