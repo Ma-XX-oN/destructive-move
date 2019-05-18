@@ -567,6 +567,9 @@ public:
     }
 
 private:
+    // TODO: Going to have to break this up into separate assign() functions.  One
+    //       that takes a destructive_movable<U>, and one that doesn't, so as to
+    //       get the noexcept clause to work itself out.
     template <typename T, typename U>
     static auto&& assign(T&& lhs, U&& rhs)
         noexcept(
@@ -574,7 +577,7 @@ private:
             && noexcept(lhs.construct(std::forward<U>(rhs)))
         )
     {
-        if constexpr (is_destructively_movable<U>::value)
+        if constexpr (is_destructively_movable<std::remove_reference_t<U>>::value)
         {
             // Only assign something if there is something to assign.
             if (rhs.is_valid()) {
