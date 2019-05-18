@@ -88,7 +88,7 @@ int main()
     afh::destructively_movable<X> x2;
     x1->test();
     x1 = x2;
-//    x1 = std::move(x2);
+    x1 = std::move(x2);
 
     std::cout << "Hello World!\n";
 }

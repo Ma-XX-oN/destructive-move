@@ -397,6 +397,9 @@ struct is_destructively_movable : std::false_type {};
 template <typename T, typename I>
 struct is_destructively_movable<destructively_movable<T, I>> : std::true_type {};
 
+template <typename T>
+using is_destructively_movable_t = is_destructively_movable<T>;
+
 namespace detail {
 template <size_t Size>
 class storage
@@ -437,6 +440,8 @@ class alignas(Contained) destructively_movable_impl
 #endif
     }
 
+    static constexpr bool has_external_tombstone = std::is_same<Derived, destructively_movable<Contained, void>>::value;
+
     template <typename T> struct bare_type_impl                           { using type = T; };
     template <typename T> struct bare_type_impl<destructively_movable<T>> { using type = T; };
 
@@ -444,34 +449,31 @@ class alignas(Contained) destructively_movable_impl
     template <typename T> using  bare_t = typename bare_type_impl<strip_t<T>>::type;
     
     template <typename T> using  fwd_to_bare_type_t = fwd_type_t<T, bare_t<T>>;
- 
-    template <typename T>
-    static void move_from_destructively_movable_implies_no_longer_valid(T&& value) noexcept
-    {
-        if constexpr (is_destructively_movable<T>::value)
-        {
-            // NOTE: is_destructively_movable<T>::value implies that
-            //       first_element is an rvalue, otherwise it would be an
-            //       lvalue reference, which would fail to match.
 
-            // Type passed is a destructively_movable with external tombstone.
-            if constexpr (std::is_same<T, destructively_movable<Contained, void>>::value) {
-                value.is_valid(false);
-            }
-            if constexpr (std::is_same<Contained, typename T::type>::value)
+    template<typename...Ts>
+    static constexpr bool is_destructively_movable_same_contained() noexcept
+    {
+        if constexpr (sizeof...(Ts) == 1) {
+            using T = strip_t<std::tuple_element_t<0, std::tuple<Ts...>>>;
+            if constexpr (is_destructively_movable<T>::value)
             {
-                // Operation was a move on a destructively_movable object.
-                assert(!value.is_valid());
+                if constexpr (std::is_same<Contained, typename T::contained>::value)
+                {
+                    return true;
+                }
             }
         }
+        return false;
     }
+
     destructively_movable_impl(destructively_movable_impl const&) = delete;
     destructively_movable_impl& operator=(destructively_movable_impl const&) = delete;
 public:
+    using contained = Contained;
 
-    using type = Contained;
     destructively_movable_impl(tombstone_tag) noexcept {
         is_valid(false);
+        assert(!is_valid());
     }
 
     template <typename...Ts>
@@ -481,6 +483,25 @@ public:
     {
         construct(std::forward<Ts>(args)...);
         assert(is_valid());
+    }
+
+    // Didn't want to have a separate "copy" and "move" constructor.  Couldn't
+    // use trinary operator without both being evaluated sides being evaluated
+    // and causing problems.  Is this better or worse than seperate construct
+    // functions?
+    template <typename...Ts>
+    static constexpr bool construct_noexcept()
+    {
+        if constexpr (is_destructively_movable_same_contained<Ts...>()) {
+            return noexcept(
+                std::declval<Derived>()
+                .construct(emplace<Contained>(std::forward<Ts>(std::declval<Ts>()).object()...)));
+        }
+        else {
+            return noexcept(
+                std::declval<Derived>()
+                .construct(emplace<Contained>(std::forward<Ts>(std::declval<Ts>())...)));
+        }
     }
 
     // Does emplace construction of Contained, including "move/copy
@@ -493,8 +514,16 @@ public:
     //       destructively_movable&& respectively.
     template <typename...Ts>
     Derived* construct(Ts&&...args)
+        noexcept(
+            construct_noexcept<Ts...>()
+        )
     {
-        construct(emplace<Contained>(std::forward<Ts>(args)...));
+        if constexpr (is_destructively_movable_same_contained<Ts...>()) {
+            construct(emplace<Contained>(std::forward<Ts>(args).object()...));
+        }
+        else {
+            construct(emplace<Contained>(std::forward<Ts>(args)...));
+        }
         assert(is_valid());
         return static_cast<Derived*>(this);
     }
@@ -511,16 +540,19 @@ public:
     {
         //OUTPUT_THIS_FUNC;
         emplace.uninitialized_construct(this);
-        if constexpr (std::is_same<Derived, destructively_movable<Contained, void>>::value) {
+        if constexpr (has_external_tombstone) {
             is_valid(true);
         }
         assert(is_valid());
-        if constexpr (sizeof...(Ts) == 1)
+        if constexpr (is_destructively_movable_same_contained<Ts...>())
         {
-            using first_element = std::tuple_element_t<0, std::tuple<Ts...>>;
-            move_from_destructively_movable_implies_no_longer_valid(
-                std::forward<first_element>(get<0>(emplace))
-            );
+            auto&& value = get<0>(emplace);
+            if constexpr (!std::is_lvalue_reference_v<decltype(value)> && value.has_external_tombstone) {
+                // Moved and has external tombstone, so exlicitly clear.
+                value.is_valid(false);
+            }
+            // Operation was a move on a destructively_movable object.
+            assert(!value.is_valid());
         }
         return static_cast<Derived*>(this);
     }
@@ -542,7 +574,7 @@ public:
     {
         OUTPUT_THIS_FUNC;
         emplace.uninitialized_construct(this);
-        if constexpr (std::is_same<Derived, destructively_movable<Contained, void>>::value) {
+        if constexpr (has_external_tombstone) {
             is_valid(true);
         }
         assert(is_valid());
@@ -562,46 +594,69 @@ public:
     {
         assert(is_valid());
         object().~Contained();
-        is_valid(false);
+        if constexpr (has_external_tombstone) {
+            is_valid(false);
+        }
         assert(!is_valid());
     }
 
 private:
-    // TODO: Going to have to break this up into separate assign() functions.  One
-    //       that takes a destructive_movable<U>, and one that doesn't, so as to
-    //       get the noexcept clause to work itself out.
+    // Used tag dispatch rather than function exclusion because heard that it's
+    // slightly better compile time performance.  This does make it for a
+    // slightly easier noexcept spec, though need to refer to caller to see
+    // what tag means.
     template <typename T, typename U>
-    static auto&& assign(T&& lhs, U&& rhs)
+    static auto&& assign(T&& lhs, U&& rhs, std::true_type)
         noexcept(
             noexcept(std::forward<T>(lhs).object() = std::forward<U>(rhs).object())
+        )
+    {
+        // Only assign something if there is something to assign.
+        if (rhs.is_valid()) {
+            // Assign the underlying lhs object to the underlying rhs object.
+            // Don't use object().operator=(...) because even if Contained is
+            // an object that has an operator=() member function, the compiler
+            // seems to get confused.  However, generally, it's limiting the
+            // type as types can be assignable, but not have an operator=(...)
+            // function, such as primitive types.
+            std::forward<T>(lhs).object() = std::forward<U>(rhs).object();
+            assert(lhs.is_valid());
+            if constexpr (rhs.has_external_tombstone) {
+                rhs.is_valid(false);
+            }
+            assert(!rhs.is_valid());
+        }
+        else if (lhs.is_valid()) {
+            lhs.destruct();
+        }
+        return fwd_like<T>(static_cast<Derived&>(lhs));
+    }
+
+    template <typename T, typename U>
+    static auto&& assign(T&& lhs, U&& rhs, std::false_type)
+        noexcept(
+            noexcept(std::forward<T>(lhs).object() = std::forward<U>(rhs))
             && noexcept(lhs.construct(std::forward<U>(rhs)))
         )
     {
-        if constexpr (is_destructively_movable<std::remove_reference_t<U>>::value)
-        {
-            // Only assign something if there is something to assign.
-            if (rhs.is_valid()) {
-                // Assign the underlying lhs object to the underlying rhs object.
-                // Don't use object().operator=(...) because even if Contained is
-                // an object that has an operator=() member function, the compiler
-                // seems to get confused.  However, generally, it's limiting the
-                // type as types can be assignable, but not have an operator=(...)
-                // function, such as primitive types.
-                std::forward<T>(lhs).object() = std::forward<U>(rhs).object();
-                move_from_destructively_movable_implies_no_longer_valid(std::forward<U>(rhs));
-            }
+        if (lhs.is_valid()) {
+            // Assign the underlying lhs object to the rhs object.
+            std::forward<T>(lhs).object() = std::forward<U>(rhs);
         }
         else {
-            if (lhs.is_valid()) {
-                // Assign the underlying lhs object to the rhs object.
-                std::forward<T>(lhs).object() = std::forward<U>(rhs);
-            }
-            else {
-                lhs.construct(std::forward<U>(rhs));
-            }
+            lhs.construct(std::forward<U>(rhs));
         }
         assert(!is_destructively_movable<U>::value || lhs.is_valid());
         return fwd_like<T>(static_cast<Derived&>(lhs));
+    }
+
+    template <typename T, typename U>
+    static auto&& assign(T&& lhs, U&& rhs)
+        noexcept(noexcept(
+            assign(std::forward<T>(lhs), std::forward<U>(rhs), is_destructively_movable_t<std::remove_reference_t<U>>{})
+        ))
+    {
+        return assign(std::forward<T>(lhs), std::forward<U>(rhs), is_destructively_movable_t<std::remove_reference_t<U>>{});
     }
 
 public:

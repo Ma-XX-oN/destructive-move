@@ -13,9 +13,19 @@
 # define NO_VTABLE 
 #endif
 
+#define CONCAT_(x, y) x ## y
+#define CONCAT(x, y) CONCAT_(x, y)
+#ifdef __COUNTER__
+# define MAKE_UNIQUE(x) CONCAT(x, __COUNTER__)
+#elif
+# define MAKE_UNIQUE(x) CONCAT(x, __LINE__)
+#endif
+
+#define INTEROGATE_TYPE_(type, ...)   using type = __VA_ARGS__; static_cast<nullptr_t>(type{})
 // Generate an error to see what the type that an expression is returning.
-#define INTEROGATE_TYPE(...)   static_cast<decltype(__VA_ARGS__)>(nullptr)
-#define INTEROGATE_TYPE_T(...) using type = __VA_ARGS__;           static_cast<nullptr_t>(type{})
+#define INTEROGATE_TYPE(...)   INTEROGATE_TYPE_(MAKE_UNIQUE(interrogated_type_), decltype(__VA_ARGS__))
+// Generate an error to see what the type is.
+#define INTEROGATE_TYPE_T(...) INTEROGATE_TYPE_(MAKE_UNIQUE(interrogated_type_),          __VA_ARGS__ )
 
 // Debugging output macros
 #define OUTPUT_FUNC      (std::cout << __FILE__ << "(" << __LINE__ << "): "                << " " << FUNCSIG << "\n")
@@ -108,7 +118,7 @@ constexpr bool is_stronger_or_same_cv_v = is_stronger_cv_v<T0, T1> || is_same_cv
 // template <typename T>
 // using remove_cvref_t
 //
-//  Returns a type with reference and any cv qualifiers removed.
+//  Returns a type without any reference and cv qualifiers.
 //  (like in C++20)
 template <typename T>
 using  remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
@@ -117,7 +127,7 @@ using  remove_cvref_t = std::remove_cv_t<std::remove_reference_t<T>>;
 // template <typename T>
 // using remove_refptr_t
 //
-//  Returns the type T with any reference or first level pointer removed.
+//  Returns the type T without any reference or first level pointer.
 template <typename T>
 using  remove_refptr_t = std::remove_pointer_t<std::remove_reference_t<T>>;
 
@@ -125,8 +135,8 @@ using  remove_refptr_t = std::remove_pointer_t<std::remove_reference_t<T>>;
 // tempate <typename T>
 // using strip_t
 //
-//  Returns the type T with any reference, first level pointer and any cv
-//  qualifiers removed.
+//  Returns the type T without any reference, first level pointer and cv
+//  qualifiers.
 template <typename T>
 using  strip_t = std::remove_cv_t<remove_refptr_t<T>>;
 
