@@ -15,7 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="destructive_move.cpp">
+    <ClCompile Include="destructively_movable.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -26,7 +26,7 @@
     <ClInclude Include="utility.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="destructive_move.hpp">
+    <ClInclude Include="destructively_movable.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
