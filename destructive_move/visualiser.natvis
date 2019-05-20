@@ -2,39 +2,39 @@
 <AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
 
   <!--Would be great if I could specify my own function as intrinsic.--> 
-  <!--<Intrinsic Name="is_valid"
-             Expression="afh::detail::destructively_movable_impl&lt;*,*&gt;::is_valid"
+  <!--<Intrinsic Name="is_tombstoned"
+             Expression="afh::detail::destructively_movable_impl&lt;*,*&gt;::is_tombstoned"
              ReturnType="bool"
              >
   </Intrinsic>-->
   <Type Name="afh::detail::destructively_movable_impl&lt;*&gt;">
-    <DisplayString>{{is_valid = {is_valid()}, object = {*($T1*)this}}}</DisplayString>
+    <DisplayString>{{is_tombstoned = {is_tombstoned()}, object = {*($T1*)this}}}</DisplayString>
     <Expand>
-      <Item Name="is_valid">is_valid()</Item>
-      <Item Name="object" Condition="is_valid()">*($T1*)this</Item>
-      <Item Name="object" Condition="!is_valid()">"* NOT VALID *"</Item>
+      <Item Name="is_tombstoned">is_tombstoned()</Item>
+      <Item Name="object" Condition="is_tombstoned()">*($T1*)this</Item>
+      <Item Name="object" Condition="!is_tombstoned()">"* NOT VALID *"</Item>
     </Expand>
   </Type>
  
   <Type Name="afh::destructively_movable&lt;*,void&gt;">
-    <DisplayString Condition="this->m_isValid">{{{*($T1*)this}}}</DisplayString>
-    <DisplayString Condition="!this->m_isValid">{{* NOT VALID *}}</DisplayString>
+    <DisplayString Condition="this->m_isTombstoned">{{{*($T1*)this}}}</DisplayString>
+    <DisplayString Condition="!this->m_isTombstoned">{{* NOT VALID *}}</DisplayString>
     <Expand>
-      <Item Name="is_valid">this->m_isValid</Item>
-      <Item Name="object" Condition="this->m_isValid">*($T1*)this</Item>
-      <Synthetic Name="object" Condition="!this->m_isValid">
+      <Item Name="is_tombstoned">this->m_isTombstoned</Item>
+      <Item Name="object" Condition="this->m_isTombstoned">*($T1*)this</Item>
+      <Synthetic Name="object" Condition="!this->m_isTombstoned">
         <DisplayString>* NOT VALID *</DisplayString>
       </Synthetic>
     </Expand>
   </Type>
 
   <Type Name="afh::detail::destructively_movable_impl&lt;*,afh::destructively_movable&lt;*&gt;&gt;">
-    <DisplayString Condition="((destructively_movable&lt;$T2&gt;*)this)->m_isValid">{{{*($T1*)((destructively_movable&lt;$T2&gt;*)this)}}}</DisplayString>
-    <DisplayString Condition="!((destructively_movable&lt;$T2&gt;*)this)->m_isValid">{{* NOT VALID *}}</DisplayString>
+    <DisplayString Condition="((destructively_movable&lt;$T2&gt;*)this)->m_isTombstoned">{{{*($T1*)((destructively_movable&lt;$T2&gt;*)this)}}}</DisplayString>
+    <DisplayString Condition="!((destructively_movable&lt;$T2&gt;*)this)->m_isTombstoned">{{* NOT VALID *}}</DisplayString>
     <Expand>
-      <Item Name="is_valid">((destructively_movable&lt;$T2&gt;*)this)->m_isValid</Item>
-      <Item Name="object" Condition="((destructively_movable&lt;$T2&gt;*)this)->m_isValid">*($T1*)((destructively_movable&lt;$T2&gt;*)this)</Item>
-      <Synthetic Name="object" Condition="!((destructively_movable&lt;$T2&gt;*)this)->m_isValid">
+      <Item Name="is_tombstoned">((destructively_movable&lt;$T2&gt;*)this)->m_isTombstoned</Item>
+      <Item Name="object" Condition="((destructively_movable&lt;$T2&gt;*)this)->m_isTombstoned">*($T1*)((destructively_movable&lt;$T2&gt;*)this)</Item>
+      <Synthetic Name="object" Condition="!((destructively_movable&lt;$T2&gt;*)this)->m_isTombstoned">
         <DisplayString>* NOT VALID *</DisplayString>
       </Synthetic>
     </Expand>

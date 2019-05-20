@@ -133,8 +133,8 @@ namespace detail
 // struct tombstone_tag {};
 //
 //  Tag to tell destructively_movable to create Contained type in a tombstoned
-//  state.  Also used in the Is_valid function object to tell Contained object
-//  to mark itself in a tombstoned state.
+//  state.  Also used in the Is_tombstoned function object to tell Contained
+//  object to mark itself in a tombstoned state.
 struct tombstone_tag {};
 
 //-----------------------------------------------------------------------------
@@ -148,7 +148,7 @@ struct tombstone_tag {};
 ////
 // Traits to specialise on
 ////
-//  Is_valid (required overloaded function object type)
+//  Is_tombstoned (required overloaded function object type)
 //
 //   This is an function object, which contains the following two overloads
 //   (and this doubles if using in a volatile context):
@@ -197,7 +197,7 @@ struct tombstone_tag {};
 template <typename T>
 struct destructively_movable_traits
 {
-    using Is_valid = void;
+    using Is_tombstoned = void;
 };
 
 //-----------------------------------------------------------------------------
@@ -226,7 +226,7 @@ using destructively_movable_destruct = typename detail::destructively_movable_de
 
 //-----------------------------------------------------------------------------
 template <typename T>
-using destructively_movable_is_valid = typename destructively_movable_traits<T>::Is_valid;
+using destructively_movable_is_valid = typename destructively_movable_traits<T>::Is_tombstoned;
 
 //-----------------------------------------------------------------------------
 // template <typename Contained>
@@ -290,11 +290,11 @@ using destructively_movable_is_valid = typename destructively_movable_traits<T>:
 ////
 //  destructively_movable_impl::~destructively_movable_impl()
 //
-//   Calls destructor on Contained only if is_valid() is true.
+//   Calls destructor on Contained only if is_tombstoned() is true.
 //
 //  void destructively_movable_impl::destruct()
 //
-//   Calls destructor on Contained object. is_valid() must be true before
+//   Calls destructor on Contained object. is_tombstoned() must be true before
 //   calling this function.
 //
 ////
@@ -313,8 +313,8 @@ using destructively_movable_is_valid = typename destructively_movable_traits<T>:
 ////
 // Validity (is object constructed)
 ////
-//  void destructively_movable_impl::is_valid()           const          noexcept;
-//  void destructively_movable_impl::is_valid()           const volitile noexcept;
+//  void destructively_movable_impl::is_tombstoned()           const          noexcept;
+//  void destructively_movable_impl::is_tombstoned()           const volitile noexcept;
 //
 //   Returns if the Contained object is constructed.
 //
@@ -428,8 +428,11 @@ using destructively_movable_is_valid = typename destructively_movable_traits<T>:
 //     destructively_movable_traits specialisation for Contained.  This would
 //     have to be implemented for any Contained type that contains types that
 //     have this issue, which is definitely not nice.  This is really a
-//     workaround.  Objects that have been moved, should not create or hang on
-//     to *ANY* resources.  Doing so make a mess on more than one level.
+//     workaround.  I think that the standard should be rewritten to say
+//     something to the effect that Objects that have been moved, should not
+//     hang on to (or create) *ANY* resources.  Doing so causes problems here
+//     and other places (such as making a move constructor to be not marked
+//     as noexcept because of allocating of memory *cough-cough*).
 template <typename Contained, typename Enabled = void>
 class destructively_movable
     : public detail::destructively_movable_impl<Contained>
@@ -459,10 +462,10 @@ public:
     destructively_movable&& operator=(destructively_movable     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
     destructively_movable&& operator=(destructively_movable const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
 
-    void is_valid(bool value)                noexcept { assert(!value);        Is_valid(*this, tombstone_tag()); }
-    void is_valid(bool value)       volatile noexcept { assert(!value);        Is_valid(*this, tombstone_tag()); }
-    bool is_valid(          ) const          noexcept {                 return Is_valid(*this); }
-    bool is_valid(          ) const volatile noexcept {                 return Is_valid(*this); }
+    void is_tombstoned(bool value)                noexcept { assert(!value);        Is_tombstoned(*this, tombstone_tag()); }
+    void is_tombstoned(bool value)       volatile noexcept { assert(!value);        Is_tombstoned(*this, tombstone_tag()); }
+    bool is_tombstoned(          ) const          noexcept {                 return Is_tombstoned(*this); }
+    bool is_tombstoned(          ) const volatile noexcept {                 return Is_tombstoned(*this); }
 
     using base::base;
 };
@@ -472,10 +475,10 @@ class destructively_movable<Contained, destructively_movable_is_valid<Contained>
     : public detail::destructively_movable_impl<Contained>
 {
     using base = detail::destructively_movable_impl<Contained>;
-    bool m_isValid;
+    bool m_isTombstoned;
 public:
     // This copy/move constructor is needed because on copying/moving,
-    // m_isValid will be updated after is was already set by the
+    // m_isTombstoned will be updated after is was already set by the
     // base copy/move constructor.  This either invalidates the value
     // or results in an extra copy.
     //
@@ -502,10 +505,10 @@ public:
     destructively_movable&& operator=(destructively_movable const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
     destructively_movable&& operator=(destructively_movable     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
 
-    void is_valid(bool value)                noexcept {        m_isValid = value; }
-    void is_valid(bool value)       volatile noexcept {        m_isValid = value; }
-    bool is_valid(          ) const          noexcept { return m_isValid; }
-    bool is_valid(          ) const volatile noexcept { return m_isValid; }
+    void is_tombstoned(bool value)                noexcept {        m_isTombstoned = value; }
+    void is_tombstoned(bool value)       volatile noexcept {        m_isTombstoned = value; }
+    bool is_tombstoned(          ) const          noexcept { return m_isTombstoned; }
+    bool is_tombstoned(          ) const volatile noexcept { return m_isTombstoned; }
 
     using base::base;
 };
@@ -536,7 +539,7 @@ class alignas(Contained) destructively_movable_impl
     : private storage<std::is_empty<Contained>::value ? 0 : sizeof(Contained)>
 {
     using Derived  = destructively_movable<Contained>;
-    using Is_valid = destructively_movable_is_valid<Contained>;
+    using Is_tombstoned = destructively_movable_is_valid<Contained>;
     using Destruct = destructively_movable_destruct<Contained>;
 
     Derived                * derived()                noexcept { return static_cast<Derived                *>(this); }
@@ -547,7 +550,7 @@ class alignas(Contained) destructively_movable_impl
     template <typename U>
     static auto&& object(U&& this_ref) noexcept
     {
-        assert(this_ref.is_valid());
+        assert(this_ref.is_tombstoned());
         return
             fwd_like<U>(
                 *std::launder(
@@ -590,8 +593,8 @@ public:
     using contained = Contained;
 
     destructively_movable_impl(tombstone_tag) noexcept {
-        is_valid(false);
-        assert(!is_valid());
+        is_tombstoned(false);
+        assert(!is_tombstoned());
     }
 
     template <typename...Ts>
@@ -600,7 +603,7 @@ public:
     ))
     {
         construct(std::forward<Ts>(args)...);
-        assert(is_valid());
+        assert(is_tombstoned());
     }
 
     // Didn't want to have a separate "copy" and "move" constructor.  Couldn't
@@ -642,7 +645,7 @@ public:
         else {
             construct(emplace<Contained>(std::forward<Ts>(args)...));
         }
-        assert(is_valid());
+        assert(is_tombstoned());
         return static_cast<Derived*>(this);
     }
 
@@ -659,18 +662,18 @@ public:
         //OUTPUT_THIS_FUNC;
         emplace.uninitialized_construct(this);
         if constexpr (has_external_tombstone) {
-            is_valid(true);
+            is_tombstoned(true);
         }
-        assert(is_valid());
+        assert(is_tombstoned());
         if constexpr (is_destructively_movable_same_contained<Ts...>())
         {
             auto&& value = get<0>(emplace);
             if constexpr (!std::is_lvalue_reference_v<decltype(value)> && value.has_external_tombstone) {
                 // Moved and has external tombstone, so exlicitly clear.
-                value.is_valid(false);
+                value.is_tombstoned(false);
             }
             // Operation was a move on a destructively_movable object.
-            assert(!value.is_valid());
+            assert(!value.is_tombstoned());
         }
         return static_cast<Derived*>(this);
     }
@@ -693,16 +696,16 @@ public:
         OUTPUT_THIS_FUNC;
         emplace.uninitialized_construct(this);
         if constexpr (has_external_tombstone) {
-            is_valid(true);
+            is_tombstoned(true);
         }
-        assert(is_valid());
+        assert(is_tombstoned());
         return static_cast<Derived*>(this);
     }
 
     ~destructively_movable_impl()
     {
         if constexpr (!std::is_trivially_destructible<Contained>::value) {
-            if (is_valid()) {
+            if (is_tombstoned()) {
                 object().~Contained();
             }
             else {
@@ -713,32 +716,32 @@ public:
 
     void destruct()
     {
-        assert(is_valid());
+        assert(is_tombstoned());
         this->~destructively_movable_impl();
         if constexpr (has_external_tombstone) {
-            is_valid(false);
+            is_tombstoned(false);
         }
-        assert(!is_valid());
+        assert(!is_tombstoned());
     }
 
     void has_been_moved() volatile noexcept
     {
-        assert( has_external_tombstone &&  is_valid()
-            || !has_external_tombstone && !is_valid());
+        assert( has_external_tombstone &&  is_tombstoned()
+            || !has_external_tombstone && !is_tombstoned());
         if constexpr (has_external_tombstone) {
-            is_valid(false);
+            is_tombstoned(false);
         }
-        assert(!is_valid());
+        assert(!is_tombstoned());
     }
 
     void has_been_moved()          noexcept
     {
-        assert( has_external_tombstone &&  is_valid()
-            || !has_external_tombstone && !is_valid());
+        assert( has_external_tombstone &&  is_tombstoned()
+            || !has_external_tombstone && !is_tombstoned());
         if constexpr (has_external_tombstone) {
-            is_valid(false);
+            is_tombstoned(false);
         }
-        assert(!is_valid());
+        assert(!is_tombstoned());
     }
 
 private:
@@ -753,7 +756,7 @@ private:
         )
     {
         // Only assign something if there is something to assign.
-        if (rhs.is_valid()) {
+        if (rhs.is_tombstoned()) {
             // Assign the underlying lhs object to the underlying rhs object.
             // Don't use object().operator=(...) because even if Contained is
             // an object that has an operator=() member function, the compiler
@@ -761,13 +764,13 @@ private:
             // type as types can be assignable, but not have an operator=(...)
             // function, such as primitive types.
             std::forward<T>(lhs).object() = std::forward<U>(rhs).object();
-            assert(lhs.is_valid());
+            assert(lhs.is_tombstoned());
             if constexpr (rhs.has_external_tombstone) {
-                rhs.is_valid(false);
+                rhs.is_tombstoned(false);
             }
-            assert(!rhs.is_valid());
+            assert(!rhs.is_tombstoned());
         }
-        else if (lhs.is_valid()) {
+        else if (lhs.is_tombstoned()) {
             lhs.destruct();
         }
         return fwd_like<T>(static_cast<Derived&>(lhs));
@@ -780,14 +783,14 @@ private:
             && noexcept(lhs.construct(std::forward<U>(rhs)))
         )
     {
-        if (lhs.is_valid()) {
+        if (lhs.is_tombstoned()) {
             // Assign the underlying lhs object to the rhs object.
             std::forward<T>(lhs).object() = std::forward<U>(rhs);
         }
         else {
             lhs.construct(std::forward<U>(rhs));
         }
-        assert(!is_destructively_movable<U>::value || lhs.is_valid());
+        assert(!is_destructively_movable<U>::value || lhs.is_tombstoned());
         return fwd_like<T>(static_cast<Derived&>(lhs));
     }
 
@@ -809,12 +812,12 @@ public:
     template <typename T> auto&& operator=(T&& rhs) volatile && { return assign(std::move(*this), std::forward<T>(rhs)); }
 
 private:
-    void is_valid(bool value)                noexcept {        derived()->is_valid(value); }
-    void is_valid(bool value)       volatile noexcept {        derived()->is_valid(value); }
+    void is_tombstoned(bool value)                noexcept {        derived()->is_tombstoned(value); }
+    void is_tombstoned(bool value)       volatile noexcept {        derived()->is_tombstoned(value); }
 
 public:
-    bool is_valid(          ) const          noexcept { return derived()->is_valid(); }
-    bool is_valid(          ) const volatile noexcept { return derived()->is_valid(); }
+    bool is_tombstoned(          ) const          noexcept { return derived()->is_tombstoned(); }
+    bool is_tombstoned(          ) const volatile noexcept { return derived()->is_tombstoned(); }
 
     // Access object as lvalue reference
     auto&& object()                &  noexcept { return object(          *this ); }
