@@ -4,6 +4,7 @@
 
 #include <utility>
 #include <type_traits>
+#include <tuple>
 
 #ifdef _MSC_VER
 # define FUNCSIG __FUNCSIG__
@@ -21,7 +22,8 @@
 # define MAKE_UNIQUE(x) CONCAT(x, __LINE__)
 #endif
 
-#define INTEROGATE_TYPE_(type, ...)   using type = __VA_ARGS__; static_cast<nullptr_t>(type{})
+#define INTEROGATE_TYPE__(type, ...)   using type = __VA_ARGS__; nullptr_t type##_var = static_cast<nullptr_t>(type{})
+#define INTEROGATE_TYPE_(type, ...)   INTEROGATE_TYPE__(type, __VA_ARGS__)
 // Generate an error to see what the type that an expression is returning.
 #define INTEROGATE_TYPE(...)   INTEROGATE_TYPE_(MAKE_UNIQUE(interrogated_type_), decltype(__VA_ARGS__))
 // Generate an error to see what the type is.
@@ -221,6 +223,26 @@ constexpr T rvalue_copy_or_lvalue_const(std::remove_reference_t<T>&& x) noexcept
 {
     static_assert(!std::is_lvalue_reference_v<T>, "Do not forward an rvalue ref as an lvalue ref");
     return x;
+}
+//=============================================================================
+namespace detail {
+    template <typename...Ts, typename Body, size_t...I>
+    void for_each_impl(std::tuple<Ts...> const& tuple, Body& body, std::index_sequence<I...>)
+        noexcept(noexcept((body(std::get<I>(tuple)), ...)))
+    {
+        (body(std::get<I>(tuple)), ...);
+    }
+}
+
+// template <typename...Ts, typename Body>
+// void for_each(std::tuple<Ts...> const& tuple, Body&& body);
+//
+//  Iterate over each tuple element.
+template <typename...Ts, typename Body>
+void for_each(std::tuple<Ts...> const& tuple, Body&& body)
+    noexcept(noexcept(detail::for_each_impl(tuple, body, std::make_index_sequence<sizeof...(Ts)>{})))
+{
+    detail::for_each_impl(tuple, body, std::make_index_sequence<sizeof...(Ts)>{});
 }
 
 } // namespace afh

@@ -6,6 +6,7 @@
 #include <new> // for launder
 #include <tuple>
 #include <assert.h>
+
 namespace afh {
 
 template<typename T, typename const_tag, typename...Ts>
@@ -175,7 +176,7 @@ struct tombstone_tag {};
 //   without the wrapper, the behaviour would be undefined.
 //
 ////
-//  Destruct (optional overloaded function object type)
+//  destruct_impl (optional overloaded function object type)
 //
 //   This is a function object, which contains the following function:
 //
@@ -192,41 +193,196 @@ struct tombstone_tag {};
 //         execute in the same order like a destructor does.  Not really
 //         necessary, but may prevent possible weirdness.
 //
-//   If Destruct is not provided, then it will be replaced with empty_destruct.
+//   If destruct_impl is not provided, then it will be replaced with empty_destruct.
 
 template <typename T>
 struct destructively_movable_traits
 {
     using Is_tombstoned = void;
-};
-
-//-----------------------------------------------------------------------------
-// Empty destructor function object.
-template <typename T>
-struct empty_destruct
-{
-    void operator()(T*) noexcept {}
+    // static constexpr bool is_destructive_move_disabled = true;
+    // static constexpr auto destructive_move_exempt = afh::destructive_move_exempt(&X::m_i, &X::m_j);
 };
 
 //-----------------------------------------------------------------------------
 namespace detail {
+    template <typename T>
+    void destruct(T& obj) noexcept(noexcept(obj.~T()))
+    {
+        obj.~T();
+    }
+
+    template<typename T>
+    struct Destruct_item {
+        T& obj;
+        template<typename T_>
+        void operator()(T_&& member) noexcept(noexcept(destruct(obj.*member))) {
+            destruct(obj.*member);
+        }
+    };
+    template<typename T>
+    Destruct_item(T&)->Destruct_item<T>;
+
+    template <typename T, typename Take_from>
+    struct Destruct_tuple_references {
+        void operator()(T& obj) noexcept(noexcept(for_each(Take_from::destructive_move_exempt, Destruct_item{ obj }))) {
+            // clang++ is having issues with the noexcept clause for lambdas
+            // causing it to crash.  Works fine for a functor.
+            //auto fn = [&obj](auto&& object) noexcept(noexcept(destruct(obj.*object))) {
+            //    destruct(obj.*object);
+            //};
+            auto fn = Destruct_item{obj};
+            // TTA: Should destructors not be allowed to throw or just wrap all
+            //      destructor calls in a try/catch(...)?
+            static_assert(noexcept(for_each(Take_from::destructive_move_exempt, fn)), "Destructors shouldn't throw.");
+            for_each(Take_from::destructive_move_exempt, fn);
+        }
+    };
+
     template <typename T, typename = void>
-    struct destructively_movable_destruct_impl {
-        using type = empty_destruct<T>;
+    struct has_destructive_move_exempt : std::false_type {};
+
+    template <typename T>
+    struct has_destructive_move_exempt<T
+        , std::void_t<decltype(T::destructive_move_exempt)>
+    > : std::true_type {};
+
+    template <typename T, typename = void>
+    struct destruct_impl {
+        void operator()(T& obj) noexcept {
+        }
+    };
+
+    // Can exist in destructively_movable_traits<T> or T.  If exists in both,
+    // the one in T overrides.
+    template <typename T>
+    struct destruct_impl<T, std::enable_if_t<
+        has_destructive_move_exempt<T>::value
+    >> : Destruct_tuple_references<T, T>
+    {
     };
 
     template <typename T>
-    struct destructively_movable_destruct_impl<T, typename destructively_movable_traits<T>::Destruct> {
-        using type = typename destructively_movable_traits<T>::Destruct;
+    struct destruct_impl<T, std::enable_if_t<
+        !has_destructive_move_exempt<T>::value
+        && has_destructive_move_exempt<destructively_movable_traits<T>>::value
+    >> : Destruct_tuple_references<T, destructively_movable_traits<T>>
+    {
     };
 }
-//-----------------------------------------------------------------------------
 template <typename T>
-using destructively_movable_destruct = typename detail::destructively_movable_destruct_impl<T>::type;
+using destructively_movable_destruct = detail::destruct_impl<T>;
 
 //-----------------------------------------------------------------------------
+namespace detail {
+    template <typename Take_from>
+    struct Is_tombstoned
+    {
+        using type = typename Take_from::Is_tombstoned;
+    };
+
+    template <typename T, typename = void>
+    struct has_is_tombstone : std::false_type {};
+
+    template <typename T>
+    struct has_is_tombstone<T
+        , std::void_t<typename T::Is_tombstone>
+    > : std::true_type {};
+
+    template <typename T, typename = void>
+    struct is_tombstoned_impl
+    {
+        using type = void;
+    };
+
+    // Can exist in destructively_movable_traits<T> or T.  If exists in both,
+    // the one in T overrides.
+    template <typename T>
+    struct is_tombstoned_impl<T, std::enable_if_t<
+        has_is_tombstone<T>::value
+    >> : Is_tombstoned<T>
+    {
+    };
+
+    template <typename T>
+    struct is_tombstoned_impl<T, std::enable_if_t<
+        !has_is_tombstone<T>::value
+        && has_is_tombstone<destructively_movable_traits<T>>::value
+    >> : Is_tombstoned<destructively_movable_traits<T>>
+    {
+    };
+}
 template <typename T>
-using destructively_movable_is_valid = typename destructively_movable_traits<T>::Is_tombstoned;
+using destructively_movable_is_tombstoned = typename detail::is_tombstoned_impl<T>::type;
+
+//-----------------------------------------------------------------------------
+namespace detail {
+    template <typename Take_from>
+    struct is_destructive_move_disabled {
+        static constexpr bool value = Take_from::is_destructive_move_disabled;
+    };
+
+    template <typename T, typename = void>
+    struct has_is_destructive_move_disabled : std::false_type {};
+
+    template <typename T>
+    struct has_is_destructive_move_disabled<T
+        , std::void_t<decltype(T::is_destructive_move_disabled)>
+    > : std::bool_constant<T::is_destructive_move_disabled> {};
+
+    template <typename T, typename = void>
+    struct is_destructive_move_disabled_impl
+    {
+        static constexpr bool value = true;
+    };
+
+    // Can exist in destructively_movable_traits<T> or T.  If exists in both,
+    // the one in T overrides.
+    template <typename T>
+    struct destruct_impl<T, std::enable_if_t<
+        has_is_destructive_move_disabled<T>::value
+    >> : is_destructive_move_disabled<T>
+    {
+    };
+
+    template <typename T>
+    struct destruct_impl<T, std::enable_if_t<
+        !has_is_destructive_move_disabled<T>::value
+        && has_is_destructive_move_disabled<destructively_movable_traits<T>>::value
+    >> : is_destructive_move_disabled<destructively_movable_traits<T>>
+    {
+    };
+}
+template <typename T>
+constexpr bool is_destructive_move_disabled = detail::is_destructive_move_disabled_impl<T>::value;
+
+//-----------------------------------------------------------------------------
+template<typename C, typename MT
+    , std::enable_if_t<!is_destructive_move_disabled<C>, int> = 0>
+constexpr auto destructive_move_exempt(MT C::* mp)
+{
+    return std::tuple{ mp };
+}
+
+template<typename C, typename MT
+    , std::enable_if_t< is_destructive_move_disabled<C>, int> = 0>
+constexpr auto destructive_move_exempt(MT C::* mp)
+{
+    return std::tuple{ };
+}
+
+template<typename C, typename MT, typename...Ts
+    , std::enable_if_t<!is_destructive_move_disabled<C>, int> = 0>
+constexpr auto destructive_move_exempt(MT C::* mp, Ts...args)
+{
+    return std::tuple_cat(std::tuple{ mp }, destructive_move_exempt(args...));
+}
+
+template<typename C, typename MT, typename...Ts
+    , std::enable_if_t< is_destructive_move_disabled<C>, int> = 0>
+constexpr auto destructive_move_exempt(MT C::* mp, Ts...args)
+{
+    return std::tuple_cat(std::tuple{ }, destructive_move_exempt(args...));
+}
 
 //-----------------------------------------------------------------------------
 // template <typename Contained>
@@ -424,7 +580,7 @@ using destructively_movable_is_valid = typename destructively_movable_traits<T>:
 //     to the moved object (cou-*MicroSoft*-gh! ;)). In this case, resources
 //     will then leak from the moved from object.
 //
-//     To get around this issue, one can define a Destruct type trait in the
+//     To get around this issue, one can define a destruct_impl type trait in the
 //     destructively_movable_traits specialisation for Contained.  This would
 //     have to be implemented for any Contained type that contains types that
 //     have this issue, which is definitely not nice.  This is really a
@@ -471,7 +627,7 @@ public:
 };
 
 template <typename Contained>
-class destructively_movable<Contained, destructively_movable_is_valid<Contained>>
+class destructively_movable<Contained, destructively_movable_is_tombstoned<Contained>>
     : public detail::destructively_movable_impl<Contained>
 {
     using base = detail::destructively_movable_impl<Contained>;
@@ -539,8 +695,8 @@ class alignas(Contained) destructively_movable_impl
     : private storage<std::is_empty<Contained>::value ? 0 : sizeof(Contained)>
 {
     using Derived  = destructively_movable<Contained>;
-    using Is_tombstoned = destructively_movable_is_valid<Contained>;
-    using Destruct = destructively_movable_destruct<Contained>;
+    using Is_tombstoned = destructively_movable_is_tombstoned<Contained>;
+    using Destruct_tuple_references = destructively_movable_destruct<Contained>;
 
     Derived                * derived()                noexcept { return static_cast<Derived                *>(this); }
     Derived       volatile * derived()       volatile noexcept { return static_cast<Derived       volatile *>(this); }
@@ -709,7 +865,7 @@ public:
                 object().~Contained();
             }
             else {
-                Destruct()(std::launder(reinterpret_cast<Contained*>(this)));
+                Destruct_tuple_references()(*std::launder(reinterpret_cast<Contained*>(this)));
             }
         }
     }
@@ -879,10 +1035,12 @@ public:
 
 #define IS_DOWNCAST (std::is_base_of<strip_t<U>, Contained>::value)
 #define IS_UPCAST   (std::is_base_of<Contained, strip_t<U>>::value && !std::is_same<Contained, strip_t<U>>::value)
-// Using ... instead of a named parameter because when enabler(const_volatile) is called with
-// const_volatile being blank (no cv), VC++ complains.
-#define IS_CV_STRONGER_OR_SAME(...) (is_stronger_or_same_cv_v<U, int __VA_ARGS__>)
-#define IS_ALWAYS_ENABLED(...)      (!always_false<U>)
+// NOTE: Using ... instead of a named parameter because when
+//       enabler(const_volatile) is called with const_volatile being blank (no
+//       cv), VC++ complains.
+// NOTE: Disabling binding to std::nullptr_t to allow INTEROGATE_TYPE() macro to work properly.
+#define ENABLE_IF_NOT_NULLPTR_T(...) (!std::is_same_v<afh::strip_t<U>, std::nullptr_t>)
+#define IS_CV_STRONGER_OR_SAME(...)  (is_stronger_or_same_cv_v<U, int __VA_ARGS__>) && ENABLE_IF_NOT_NULLPTR_T()
 
 #define CONVERSION(const_volatile, convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
         template <typename U, std::enable_if_t< enabler(const_volatile) , int> = 0>             \
@@ -905,12 +1063,12 @@ public:
     CONVERSION_ALL_CVS(&&, &&,                !IS_CV_STRONGER_OR_SAME, explicit);
     CONVERSION_ALL_CVS(& , & ,                !IS_CV_STRONGER_OR_SAME, explicit);
 
-    CONVERSION_ALL_CVS(&&, & ,                      IS_ALWAYS_ENABLED, explicit);
-    CONVERSION_ALL_CVS(& , &&,                      IS_ALWAYS_ENABLED, explicit);
+    CONVERSION_ALL_CVS(&&, & ,                ENABLE_IF_NOT_NULLPTR_T, explicit);
+    CONVERSION_ALL_CVS(& , &&,                ENABLE_IF_NOT_NULLPTR_T, explicit);
 
 #undef CONVERSION_ALL_CVS
 #undef CONVERSION
-#undef IS_ALWAYS_ENABLED
+#undef ENABLE_IF_NOT_NULLPTR_T
 #undef IS_CV_STRONGER_OR_SAME
 #undef IS_UPCAST
 #undef IS_DOWNCAST

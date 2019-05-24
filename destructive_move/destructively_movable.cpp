@@ -5,12 +5,55 @@
 
 static int i = 0;
 
+struct Y;
+template <typename T, std::enable_if_t<std::is_same_v<afh::remove_cvref_t<T>, Y>, int> = 0>
+std::ostream& operator<<(std::ostream& os, T const& obj);
+
+struct Y {
+    int m_i = ++i;
+    float m_j = ++i;
+    Y()           { std::cout << "Y default constructed " << *this << "\n"; }
+    
+    Y(Y const &x) { std::cout << "Y    copy constructed " << *this << "\n"; }
+    Y& operator=(Y const& x) {
+        std::cout             << "Y       copy assigned " << *this << " = " << x << "\n";
+        m_i = x.m_i;
+        return *this;
+    }
+
+    Y(Y      &&x) { std::cout << "Y    move constructed " << *this << "\n"; }
+    Y& operator=(Y     && x) {
+        std::cout             << "Y       move assigned " << *this << " = " << x << "\n";
+        m_i = x.m_i;
+        return *this;
+    }
+    
+    ~Y()          { std::cout << "Y          destructed " << *this << "\n"; }
+
+    void test()                && { std::cout << "               rvalue " << *this << "\n"; }
+    void test()       volatile && { std::cout << "      volatile rvalue " << *this << "\n"; }
+    void test() const          && { std::cout << "const          rvalue " << *this << "\n"; }
+    void test() const volatile && { std::cout << "const volatile rvalue " << *this << "\n"; }
+
+    void test()                &  { std::cout << "               lvalue " << *this << "\n"; }
+    void test()       volatile &  { std::cout << "      volatile lvalue " << *this << "\n"; }
+    void test() const          &  { std::cout << "const          lvalue " << *this << "\n"; }
+    void test() const volatile &  { std::cout << "const volatile lvalue " << *this << "\n"; }
+};
+
 struct X;
 template <typename T, std::enable_if_t<std::is_same_v<afh::remove_cvref_t<T>, X>, int> = 0>
 std::ostream& operator<<(std::ostream& os, T const& obj);
 
+template <typename T, std::enable_if_t<std::is_same_v<afh::remove_cvref_t<T>, Y>, int> /*= 0*/>
+std::ostream& operator<<(std::ostream& os, T const& obj)
+{
+    return os << "(*" << ((void*)&obj) << " = { " << obj.m_i << " })";
+}
+
 struct X {
     int m_i = ++i;
+    Y m_j;
     X()           { std::cout << "X default constructed " << *this << "\n"; }
     
     X(X const &x) { std::cout << "X    copy constructed " << *this << "\n"; }
@@ -45,6 +88,14 @@ std::ostream& operator<<(std::ostream& os, T const& obj)
 {
     return os << "(*" << ((void*)&obj) << " = { " << obj.m_i << " })";
 }
+
+template <>
+struct ::afh::destructively_movable_traits<X>
+{
+    using Is_tombstoned = void;
+    constexpr static auto destructive_move_exempt = afh::destructive_move_exempt(&X::m_i, &X::m_j);
+};
+
 
 int main()
 {

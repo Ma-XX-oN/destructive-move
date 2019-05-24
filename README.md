@@ -71,7 +71,7 @@ Implicit casts all work as well, from changing to a stronger cv qualifier, to do
 The `operator&` is also overloaded to return a cv qualified `Contained*` and if for some reason, the object needs to be retrived in some other way that isn't usable via the other means, then there is an `object()` method that returns a fully ref and cv qualified reference based on the qualifiers of the `destructively_movable` container object.
 
 ## Destruction
-When a `destructively_movable` object is destroyed, its destructor is still called, but the destuctor will only call the Contained object's destructor if the tombstone marker is set.  So, if this object contains more than one object, this should cause a slight performance boost.  The more sub-objects the Contained object consists of that have non-trivial destructors, the greater the performance gain.  A moved object that allocates/holds onto resources will not work in this scenario (see caveats[<sup>[5]</sup>](#caveat-hold-resource-after-move))
+When a `destructively_movable` object is destroyed, its destructor is still called, but the destuctor will only call the Contained object's destructor if the tombstone marker is set.  So, if this object contains more than one sub-object that have non-trivial destructors, this should cause a slight performance boost.  The more sub-objects, the greater the performance gain.  A moved object that allocates/holds onto resources will not work in this scenario (see caveats[<sup>[5]</sup>](#caveat-hold-resource-after-move))
 
 ## Caveats
 
