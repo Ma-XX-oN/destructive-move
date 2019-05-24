@@ -11,7 +11,7 @@ std::ostream& operator<<(std::ostream& os, T const& obj);
 
 struct Y {
     int m_i = ++i;
-    float m_j = ++i;
+    float m_j = (float)++i;
     Y()           { std::cout << "Y default constructed " << *this << "\n"; }
     
     Y(Y const &x) { std::cout << "Y    copy constructed " << *this << "\n"; }
@@ -48,12 +48,13 @@ std::ostream& operator<<(std::ostream& os, T const& obj);
 template <typename T, std::enable_if_t<std::is_same_v<afh::remove_cvref_t<T>, Y>, int> /*= 0*/>
 std::ostream& operator<<(std::ostream& os, T const& obj)
 {
-    return os << "(*" << ((void*)&obj) << " = { " << obj.m_i << " })";
+    return os << "(*" << ((void*)&obj) << " = { " << obj.m_i << ", " << obj.m_j << " })";
 }
 
 struct X {
     int m_i = ++i;
-    Y m_j;
+    float m_j = (float)++i;
+    Y m_y;
     X()           { std::cout << "X default constructed " << *this << "\n"; }
     
     X(X const &x) { std::cout << "X    copy constructed " << *this << "\n"; }
@@ -86,14 +87,14 @@ struct X {
 template <typename T, std::enable_if_t<std::is_same_v<afh::remove_cvref_t<T>, X>, int> /*= 0*/>
 std::ostream& operator<<(std::ostream& os, T const& obj)
 {
-    return os << "(*" << ((void*)&obj) << " = { " << obj.m_i << " })";
+    return os << "(*" << ((void*)&obj) << " = { " << obj.m_i << ", " << obj.m_j << ", " << obj.m_y << " })";
 }
 
 template <>
 struct ::afh::destructively_movable_traits<X>
 {
     using Is_tombstoned = void;
-    constexpr static auto destructive_move_exempt = afh::destructive_move_exempt(&X::m_i, &X::m_j);
+    //constexpr static auto destructive_move_exempt = afh::destructive_move_exempt(&X::m_i, &X::m_j);
 };
 
 
