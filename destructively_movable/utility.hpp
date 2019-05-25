@@ -1,3 +1,15 @@
+/// \file
+// destructively_movable library
+//
+//  Copyright Adrian Hawryluk 2019.
+//
+//  Use, modification and distribution is subject to the
+//  MIT License. (See accompanying
+//  file LICENSE.txt or copy at
+//  https://opensource.org/licenses/MIT)
+//
+// Project home: https://github.com/Ma-XX-oN/destructive-move
+//
 #pragma once
 #ifndef AFH_UTILITY_HPP__
 #define AFH_UTILITY_HPP__
