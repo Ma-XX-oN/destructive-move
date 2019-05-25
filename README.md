@@ -20,7 +20,7 @@ struct X { /*...*/ };
 afh::destructively_movable<X> x;
 ```
 
-This will define a variable `x` that is of type X which is destructively movable.  Note that this will work for the trivial case where X is trivially destructible and should not add any overhead in that case, but atm a tombstoned state is still required.  This will be fixed later.
+This will define a variable `x` that is of type X which is destructively movable.  Note that this will work for the trivial case where X is trivially destructible and doesn't add any overhead in that case.
 
 ## Tombstoned State
 
