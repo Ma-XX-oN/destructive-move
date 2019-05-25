@@ -8,7 +8,7 @@ This library is in responce to the question in [CppCon Grill the Committee](http
 
 ## Description
 
-A `destructively_movable` template is a type that hides its Contained type from the compiler, but will call that Contained type's destructor if it is determined that the object isn't constructed (tricky part).
+A `destructively_movable` template is a type that hides its Contained type from the compiler, but will call that Contained type's destructor if it is determined that the object isn't constructed (the tricky part).
 
 It has the same size[<sup>[1]</sup>](#caveat-same-size) and alignment of the Contained type and is supposed to be an (almost) drop-in replacement[<sup>[2]</sup>](#caveat-drop-in-replacement) for that type.
 
@@ -20,11 +20,11 @@ struct X { /*...*/ };
 afh::destructively_movable<X> x;
 ```
 
-This will define a variable `x` that is of type X which is destructively movable.  Note that this will work for the trivial case where X is trivially destructible and will not add any overhead in that case.
+This will define a variable `x` that is of type X which is destructively movable.  Note that this will work for the trivial case where X is trivially destructible and should not add any overhead in that case, but atm a tombstoned state is still required.  This will be fixed later.
 
 ## Tombstoned State
 
-Without any additional code, the previous example will result in the size to be a little larger than `X` would have been on its own.  This is because there is nothing describing an internal tombstone state or how to set it, so it must add an external Boolean to the object to flag that state.  To specify what the internal tombstone state is and how to set it, a `destructively_movable_traits` specialisation is needed to be added.
+Without any additional code, the previous example will result in the size to be a little larger than `X` would have been on its own.  This is because there is nothing describing an internal tombstone state or how to set it, so it must add an external Boolean to the object to flag that state.  To specify what the internal tombstone state is and how to set it a trait can be specified inside of the class:
 
 ```c++
 struct X {
@@ -40,15 +40,26 @@ struct X {
     }
   };
 };
-
-template<>
-::afh::destructively_movable_traits<X> {
-  // TTA: Should I make this auto-check X for Is_tombstoned?
-  using Is_tombstoned = typename X::Is_tombstoned;
-};
-
-destructively_movable<X> x;
 ```
+
+Alternatively, the trait can be added to a `destructively_movable_traits` specialisation:
+```c++
+template<>
+afh::destructively_movable_traits<X> {
+  struct Is_tombstoned {
+    bool operator()(X const& x) {
+      // Check x for tombstone state
+      return /*...*/;
+    }
+    void operator()(X& x, afh::tombstone_tag) {
+      // Set x to tombstone state.  Assumed that x is uninitiaised
+      // or that the contents have been moved.
+    }
+  };
+};
+```
+
+The trait inside of the class will always take precedence.
 
 What is a tombstoned state?  It is a state that indicates the the object holds no resources and can be destroyed without having to call it's destructor.  Having an external tombstone state has its drawbacks (see caveats[<sup>[3]</sup>](#caveat-external-tombstone)).
 
@@ -76,7 +87,7 @@ When a `destructively_movable` object is destroyed, its destructor is still call
 ## Caveats
 
 1. <a name="caveat-same-size"></a>
-   The size is only the same if the type has some intenal tombstone marker.
+   The size is only the same if the type has some intenal tombstone marker, otherwise a bool flag will be appended to the object, which isn't optimal, but can do in a pinch.  See caveats[<sup>[3]</sup>](#caveat-external-tombstone).
 
 2. <a name="caveat-drop-in-replacement"></a>
    The structure reference (*`operator.`*) isn't overloadable.  So we must be satisfied with either using the structure dereference (*`operator->`*) to access the Contained object's members or getting the object via cast or function call and performing operations on that.
@@ -90,6 +101,40 @@ When a `destructively_movable` object is destroyed, its destructor is still call
    Upcasting is not available unless the type being casted to doesn't increase in size.
 
 5. <a name="caveat-hold-resource-after-move"></a>
-   If, after a move, the Contained object allocates/retains any resources (cou-*MicroSoft*-gh! ;)), then using `destructively_movable` on that object will cause a leak in the moved from object.\
-\
-   To get around this issue, one can define a `Destruct` type trait in the `destructively_movable_traits` specialisation for Contained.  This would have to be implemented for any Contained type that contains types that have this issue, which is definitely not nice.  This is really a workaround.  IMO, the standard should be made more specific to say something to the effect that Objects that have been moved, should not retain (or create) *ANY* resources.  Doing so causes problems here and other places (such as move constructor to be not marked as noexcept because of allocating of memory *cough-cough*).
+   If, after a move, the Contained object allocates/retains any resources (*cou-MicroSoft-gh! ;)*), then using `destructively_movable` on that object will cause a leak in the moved from object.
+
+   To get around this issue, one can define a two trait `constexpr` values:
+   - `is_destructive_move_disabled` is a `bool` can be set to `true` and it will disallow the type being even contained in the template.
+   - `destructive_move_exempt` contains member pointers *and* if the member's type has the trait `is_destructive_move_disabled` set to `true`, then it will call the member's destructor.  This would have to be added for any Contained type that contains types that have this issue.
+
+    E.g.
+    ```c++
+    struct X {
+      /*...*/
+      static constexpr bool is_destructive_move_disabled = true;
+    };
+
+    struct Y {
+      X x;
+      // afh::destructive_move_exempt(...) is a variadict template function.
+      static constexpr auto destructive_move_exempt = afh::destructive_move_exempt(&X::x);
+    };
+    ```
+
+    Or put in the `destructively_movable_traits` specialisation:
+    ```c++
+    template<>
+    afh::destructively_movable_traits<X> {
+      static constexpr bool is_destructive_move_disabled = true;
+    };
+
+    template<>
+    afh::destructively_movable_traits<Y> {
+      // afh::destructive_move_exempt(...) is a variadict template function.
+      static constexpr auto destructive_move_exempt = afh::destructive_move_exempt(&X::x);
+    };
+    ```
+
+    This is really a workaround.  IMO, the standard should be made more specific to say something to the effect that Objects that have been moved, should not retain (or create) *ANY* resources.  Doing so causes problems here and other places (such as move constructor to be not marked as noexcept because of allocating of memory *cough-cough*).
+
+    At least doing it in this way will allow user's of a class to explictly disallow vendor classes from being accidentally instantiated and specify in the user's classes the members that have to be cleaned up.  It also further allows vendors to fix their classes and transperently push the fix to the users by setting `is_destructive_move_disabled` to `false` in their class. This has the effect of stopping the vendor's class destructor from being called when used in a Contained object, without requiring any changes to the user's class by modifying `destructive_move_exempt`.

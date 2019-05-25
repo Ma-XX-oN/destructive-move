@@ -173,9 +173,6 @@
     <ClInclude Include="destructively_movable.hpp" />
     <ClInclude Include="utility.hpp" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="README.md" />
-  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

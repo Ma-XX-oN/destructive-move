@@ -142,14 +142,18 @@ struct tombstone_tag {};
 // template <typename T>
 // struct destructively_movable_traits;
 //
-//  Specifies a default function overload object to mark or get valid state of
-//  type T.  If set to tombstone_tag, then this explictly states that the type
-//  can not be used with a destructively_movable object.
+//  Externally specifies destructivly_movable traits for a type.  These traits
+//  can also be added directly to the class.
+//
+//  NOTE: If they exist in the class and a destructivly_movable traits also
+//        exists for the class, the the individual defined trait in the class
+//        will take precedence.
 //
 ////
 // Traits to specialise on
 ////
-//  Is_tombstoned (required overloaded function object type)
+//  Is_tombstoned (optional overloaded function object type, default external
+//  tombstone)
 //
 //   This is an function object, which contains the following two overloads
 //   (and this doubles if using in a volatile context):
@@ -159,42 +163,51 @@ struct tombstone_tag {};
 //     void operator()(Contained               &, tombstone_tag) noexcept;
 //     void operator()(Contained       volatile&, tombstone_tag) noexcept;
 //
-//   The first two will query the Contained object if it is valid. The second
-//   two explicitly tell the object to put itself into an invalid state. The
-//   second is only called if the destructively_movable object was constructed
-//   using the tombstone_tag, or was destructed using the destruct()
-//   operation.  A moved object should cause that object to be implictly marked
-//   as invalid.
+//   Declaring this means that the object has an internal tombstone marker.
+//   This function object, states if that tombstone marker is set (first two
+//   overloads) or will explictly set it (last two overloads).
 //
-//   It is required that the object, when its contents have been moved to
-//   another object, if queried if it's valid, that it will respond false.
+//   The getters are used to confirm the state in debug mode, and when
+//   determining if there is an object there to delete or assign to a
+//   destructively_movable.  The setters are only used when the
+//   destructively_movable object is initialised with the tombstone_tag object
+//   (means that the type is not constructed at definition).
+//
+//   When the contents of an object is moved, the getter must return false.
 //   This state doesn't invalidate the "valid but otherwise indeterminate
 //   state" mantra.  This tombstoned state is part of that state.  If,
-//   however, the class is never used without the destructively_movable
-//   template wrapper, then it is concievable that it could programmed such
-//   that it might be put in a truely invalid state, where if destructed
-//   without the wrapper, the behaviour would be undefined.
+//   however, the Contained class is never used without the
+//   destructively_movable template wrapper, then it is concievable that one
+//   could programme the a move such that the only valid operation is to query
+//   the tombstone state, and any attempt to destruct the object would result
+//   in UB.
 //
 ////
-//  destruct_impl (optional overloaded function object type)
+//  is_destructive_move_disabled (optional constexpr static bool, default false)
 //
-//   This is a function object, which contains the following function:
+//   Specifies if the object doesn't like being "dropped on the floor" after a
+//   move operation.  This really shouldn't be necessary, but some types just
+//   don't play that nice when their guts get ripped out.  Some actually even
+//   allocate new objects (cou-*MicroSoft*-gh! ;)).  Because of this, this
+//   workaround is a necessary evil.
 //
-//     void operator()(Contained         &) noexcept
+////
+//  destructive_move_exempt (optional constexpr static auto, default empty)
 //
-//   This really shouldn't be necessary, but some types just don't play that
-//   nice when their guts get ripped out.  Some actually even allocate new
-//   objects (cou-*MicroSoft*-gh! ;)).  Because of this, this workaround is a
-//   necessary evil, and is called when the moved object is supposed to be
-//   destructed.  This allows explicit destruction of those sub-objects in
-//   Contained that don't play nice.
+//   This is a means to specify members that are to be excempt from having
+//   their internals being "dropped on the floor":
+//
+//     constexpr static auto destructive_move_exempt
+//       = afh::destructive_move_exempt(&X::member_0, ..., &X::member_N);
+//
+//   This will result in each of the specified member pointers to have their
+//   destructor called on it unless there the is_destructive_move_disabled
+//   trait has a false value.  In that case, the destructor is still not called.
 //
 //   NOTE: Best to destruct the required objects in reverse order that they
-//         execute in the same order like a destructor does.  Not really
-//         necessary, but may prevent possible weirdness.
-//
-//   If destruct_impl is not provided, then it will be replaced with empty_destruct.
-
+//         are defined in the class, so they would be destroyed in the same
+//         order as if the destructor called it.  Shouldn't be really necessary,
+//         but may prevent possible weirdness.
 template <typename T>
 struct destructively_movable_traits
 {
@@ -694,6 +707,8 @@ template <typename Contained>
 class alignas(Contained) destructively_movable_impl
     : private storage<std::is_empty<Contained>::value ? 0 : sizeof(Contained)>
 {
+    static_assert(afh::is_destructive_move_disabled<Contained>, "Cannot wrap Contained in a destructively_movable template as it is marked disabled");
+
     using Derived  = destructively_movable<Contained>;
     using Is_tombstoned = destructively_movable_is_tombstoned<Contained>;
     using Destruct_tuple_references = destructively_movable_destruct<Contained>;
@@ -1021,6 +1036,9 @@ public:
     //     T&  from &&     | don't care | don't care           ||  explicit 
     //
     // There is no exception when downcasting, hence noexcept(IS_DOWNCAST).
+    // Although I state upcasting in the table, since this is a container with
+    // a specific size, upcasting is only valid if the size of the type casted
+    // to is the same.
     //
     // There will be 4 functions (no cv, c, v, and cv) for each line in the
     // chart.  That's 4*8 = 32 functions.  That's a lot of code, with a lot of
@@ -1040,12 +1058,13 @@ public:
 //       cv), VC++ complains.
 // NOTE: Disabling binding to std::nullptr_t to allow INTEROGATE_TYPE() macro to work properly.
 #define ENABLE_IF_NOT_NULLPTR_T(...) (!std::is_same_v<afh::strip_t<U>, std::nullptr_t>)
-#define IS_CV_STRONGER_OR_SAME(...)  (is_stronger_or_same_cv_v<U, int __VA_ARGS__>) && ENABLE_IF_NOT_NULLPTR_T()
+#define IS_CV_STRONGER_OR_SAME(...)  (is_stronger_or_same_cv_v<U, int __VA_ARGS__> && ENABLE_IF_NOT_NULLPTR_T())
 
 #define CONVERSION(const_volatile, convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
-        template <typename U, std::enable_if_t< enabler(const_volatile) , int> = 0>             \
+        template <typename U, std::enable_if_t<enabler(const_volatile), int> = 0>               \
         explicit operator U convert_to_lrvalue () const_volatile convert_from_lrvalue noexcept  \
         {                                                                                       \
+            static_assert(sizeof(U) <= sizeof(Contained), "Cannot upcast to a larger type.");   \
             return fwd_like<U convert_to_lrvalue>(const_cast<Contained&>(object()));            \
         }
 
