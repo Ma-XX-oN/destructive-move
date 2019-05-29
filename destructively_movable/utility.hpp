@@ -1,5 +1,5 @@
 /// \file
-// destructively_movable library
+// optional_v2 library
 //
 //  Copyright Adrian Hawryluk 2019.
 //
@@ -11,39 +11,40 @@
 // Project home: https://github.com/Ma-XX-oN/destructive-move
 //
 #pragma once
-#ifndef AFH_UTILITY_HPP__
-#define AFH_UTILITY_HPP__
+#ifndef AFH___UTILITY_HPP
+#define AFH___UTILITY_HPP
 
 #include <utility>
 #include <type_traits>
 #include <tuple>
+#include <cwchar>
 
 #ifdef _MSC_VER
-# define FUNCSIG __FUNCSIG__
-# define NO_VTABLE __declspec(novtable)
+# define AFH___FUNCSIG __FUNCSIG__
+# define AFH___NO_VTABLE __declspec(novtable)
 #else
-# define FUNCSIG __PRETTY_FUNCTION__
-# define NO_VTABLE 
+# define AFH___FUNCSIG __PRETTY_FUNCTION__
+# define AFH___NO_VTABLE 
 #endif
 
-#define CONCAT_(x, y) x ## y
-#define CONCAT(x, y) CONCAT_(x, y)
+#define AFH___CONCAT_(x, y) x ## y
+#define AFH___CONCAT(x, y) AFH___CONCAT_(x, y)
 #ifdef __COUNTER__
-# define MAKE_UNIQUE(x) CONCAT(x, __COUNTER__)
+# define AFH___MAKE_UNIQUE(x) AFH___CONCAT(x, __COUNTER__)
 #elif
-# define MAKE_UNIQUE(x) CONCAT(x, __LINE__)
+# define AFH___MAKE_UNIQUE(x) AFH___CONCAT(x, __LINE__)
 #endif
 
-#define INTEROGATE_TYPE__(type, ...)   using type = __VA_ARGS__; nullptr_t type##_var = static_cast<nullptr_t>(type{})
-#define INTEROGATE_TYPE_(type, ...)   INTEROGATE_TYPE__(type, __VA_ARGS__)
+#define AFH___INTEROGATE_TYPE__(type, ...)   using type = __VA_ARGS__; nullptr_t type##_var = static_cast<nullptr_t>(type{})
+#define AFH___INTEROGATE_TYPE_(type, ...)   AFH___INTEROGATE_TYPE__(type, __VA_ARGS__)
 // Generate an error to see what the type that an expression is returning.
-#define INTEROGATE_TYPE(...)   INTEROGATE_TYPE_(MAKE_UNIQUE(interrogated_type_), decltype(__VA_ARGS__))
+#define AFH___INTEROGATE_TYPE(...)   AFH___INTEROGATE_TYPE_(AFH___MAKE_UNIQUE(interrogated_type_), decltype(__VA_ARGS__))
 // Generate an error to see what the type is.
-#define INTEROGATE_TYPE_T(...) INTEROGATE_TYPE_(MAKE_UNIQUE(interrogated_type_),          __VA_ARGS__ )
+#define AFH___INTEROGATE_TYPE_T(...) AFH___INTEROGATE_TYPE_(AFH___MAKE_UNIQUE(interrogated_type_),          __VA_ARGS__ )
 
 // Debugging output macros
-#define OUTPUT_FUNC      (std::cout << __FILE__ << "(" << __LINE__ << "): "                << " " << FUNCSIG << "\n")
-#define OUTPUT_THIS_FUNC (std::cout << __FILE__ << "(" << __LINE__ << "): " << (void*)this << " " << FUNCSIG << "\n")
+#define AFH___OUTPUT_FUNC      (std::cout << __FILE__ << "(" << __LINE__ << "): "                << " " << AFH___FUNCSIG << "\n")
+#define AFH___OUTPUT_THIS_FUNC (std::cout << __FILE__ << "(" << __LINE__ << "): " << (void*)this << " " << AFH___FUNCSIG << "\n")
 
 namespace afh {
 //=============================================================================
@@ -238,7 +239,7 @@ constexpr T rvalue_copy_or_lvalue_const(std::remove_reference_t<T>&& x) noexcept
 }
 //=============================================================================
 namespace detail {
-    template <typename...Ts, typename Body, size_t...I>
+    template <typename...Ts, typename Body, std::size_t...I>
     void for_each_impl(std::tuple<Ts...> const& tuple, Body& body, std::index_sequence<I...>)
         noexcept(noexcept((body(std::get<I>(tuple)), ...)))
     {
@@ -257,5 +258,43 @@ void for_each(std::tuple<Ts...> const& tuple, Body&& body)
     detail::for_each_impl(tuple, body, std::make_index_sequence<sizeof...(Ts)>{});
 }
 
+template <typename T>
+struct member_type {
+    using type = void;
+};
+
+template <typename MT, typename C>
+struct member_type<MT C::*>
+{
+    using type = MT;
+};
+
+template <typename T>
+using member_type_t = typename member_type<T>::type;
+
+// Helper macro
+#define AFH___GET_P(p, c, m) \
+    reinterpret_cast<member_type<decltype(&c::m)>*>(reinterpret_cast<char*>(p) + offset(c, m))
+
+// Sets within an uninitialised memory area [p, p+1), as if c were to have been
+// constructed at p, the member c::m to the value v.
+//
+// NOTE: This only would work if member m is accessible (either public, or set
+//       from a function that is a friend or is protected and set from a member
+//       function that inherits from class c, or from within class c).
+// NOTE: Don't use this on a member that holds onto *ANY* resources when
+//       initialised.
+#define AFH___SET(p, c, m, v) \
+    new (AFH___GET_P(p, c, m)) member_type<decltype(&c::m)>(v)
+
+// Gets within partially initialised memory area [p, p+1), as if c were to have
+// been constructed at p, the member c::m.  C++ object model states that
+// something must have been initialised there, so use AFH___SET() macro to do
+// that first.
+//
+// NOTE: See restrictions in AFH___SET() macro.
+#define AFH___GET(p, c, m) \
+    *std::launder(AFH___GET_P(p, c, m))
+
 } // namespace afh
-#endif // #ifndef AFH_UTILITY_HPP__
+#endif // #ifndef AFH___UTILITY_HPP

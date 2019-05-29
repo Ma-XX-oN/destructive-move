@@ -1,5 +1,5 @@
 /// \file
-// destructively_movable library
+// optional_v2 library
 //
 //  Copyright Adrian Hawryluk 2019.
 //
@@ -106,14 +106,28 @@ std::ostream& operator<<(std::ostream& os, T const& obj)
 template <>
 struct ::afh::destructively_movable_traits<X>
 {
-    using Is_tombstoned = void;
+    using Tombstone_functions = void;
     //constexpr static auto destructive_move_exempt = afh::destructive_move_exempt(&X::m_i, &X::m_j);
 };
 
+template <bool TL, typename T> decltype(auto) make_lvalue_conditionally(T&& x) { return static_cast<std::conditional_t<TL, T&, T&&>>(x); }
+
+// T is what is being passed in.
+// TL is if the type T is an lvalue
+// U is what is being accepted.
+// UL is if the type U is an lvalue
+template <bool TL, typename T, std::enable_if_t< ( TL), int> = 0> void take(T&  x) {};
+template <bool TL, typename T, std::enable_if_t< (!TL), int> = 0> void take(T&& x) {};
+template <bool TL, typename T, bool UL, typename U, typename = void> struct  takes                                                                                                     : std::false_type {};
+template <bool TL, typename T, bool UL, typename U>                  struct  takes<TL, T, UL, U, std::void_t<decltype(take<UL, U>(make_lvalue_conditionally<TL>(std::declval<T>())))>> : std::true_type  {};
+template <bool TL, typename T, bool UL, typename U> constexpr bool takes_v = takes<TL, T, UL, U>::value;
 
 int main()
 {
-    afh::destructively_movable<X> x;
+    static_assert(std::is_void_v<afh::optional_v2_tombstone_functions<X>>, "");
+    static_assert(!std::is_trivially_destructible_v<X>, "");
+
+    afh::optional_v2<X> x;
     std::cout << "\n--] lvalues [----------\n";
     x->test();
 
@@ -132,19 +146,35 @@ int main()
     static_cast<X const volatile &&>(x).test();
 
     std::cout << "\n--] lvalues [----------\n";
-    static_cast<afh::destructively_movable<X>                & >(x)->test();
-    static_cast<afh::destructively_movable<X>       volatile & >(x)->test();
-    static_cast<afh::destructively_movable<X> const          & >(x)->test();
-    static_cast<afh::destructively_movable<X> const volatile & >(x)->test();
+    static_cast<afh::optional_v2<X>                & >(x)->test();
+    static_cast<afh::optional_v2<X>       volatile & >(x)->test();
+    static_cast<afh::optional_v2<X> const          & >(x)->test();
+    static_cast<afh::optional_v2<X> const volatile & >(x)->test();
 
     std::cout << "\n--] lvalues [----------\n";
-    static_cast<afh::destructively_movable<X>                &&>(x)->test();
-    static_cast<afh::destructively_movable<X>       volatile &&>(x)->test();
-    static_cast<afh::destructively_movable<X> const          &&>(x)->test();
-    static_cast<afh::destructively_movable<X> const volatile &&>(x)->test();
+    static_cast<afh::optional_v2<X>                &&>(x)->test();
+    static_cast<afh::optional_v2<X>       volatile &&>(x)->test();
+    static_cast<afh::optional_v2<X> const          &&>(x)->test();
+    static_cast<afh::optional_v2<X> const volatile &&>(x)->test();
 
-    afh::destructively_movable<X> x1;
-    afh::destructively_movable<X> x2;
+    X x3;
+    take<true, X>(x3);
+    take<false, X>(std::move(x3));
+    //take<X, false>(x3);
+    //take<X, true>(std::move(x3));
+
+    
+    auto f = [](X&&) {};
+    static_assert(std::is_void_v<decltype(f(make_lvalue_conditionally<0>(std::declval<X>())))>, "");
+    static_assert( takes_v<0, X, 0, X>, "");
+    static_assert(!takes_v<1, X, 0, X>, "");
+    static_assert(!takes_v<0, X, 1, X>, "");
+    static_assert( takes_v<1, X, 1, X>, "");
+
+    static_assert(takes_v<0, X, 0, X>, "");
+
+    afh::optional_v2<X> x1;
+    afh::optional_v2<X> x2;
     x1->test();
     x1 = x2;
     x1 = std::move(x2);

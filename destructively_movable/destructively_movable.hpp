@@ -1,6 +1,6 @@
 #pragma once
 /// \file
-// destructively_movable library
+// optional_v2 library
 //
 //  Copyright Adrian Hawryluk 2019.
 //
@@ -17,14 +17,15 @@
 #include "utility.hpp"
 #include <new> // for launder
 #include <tuple>
-#include <assert.h>
+#include <cwchar>
+#include <cassert>
 
 namespace afh {
 
 template<typename T, typename const_tag, typename...Ts>
 struct emplace_params;
 
-template <size_t I, typename...Ts>
+template <std::size_t I, typename...Ts>
 auto&& get(emplace_params<Ts...>& params);
 
 struct make_lvalue_const_tag {};
@@ -43,7 +44,7 @@ struct make_rvalue_copy_lvalue_const_tag {};
 template<typename T, typename const_tag, typename...Ts>
 struct emplace_params
 {
-    template <size_t I, typename...Us>
+    template <std::size_t I, typename...Us>
     friend auto&& get(emplace_params<Us...>& params);
 
     emplace_params(Ts&&...args)
@@ -123,30 +124,30 @@ auto emplace(Ts&& ...args)
 }
 
 //-----------------------------------------------------------------------------
-// template <size_t I, typename...Ts>
+// template <std::size_t I, typename...Ts>
 // auto&& get(emplace_params<Ts...>& params);
 //
 //  Gets the Ith stored reference in the emplace_params object.  As this
 //  function doesn't care what the types are, it just puts them all into a
 //  parameter pack.
-template <size_t I, typename...Ts>
+template <std::size_t I, typename...Ts>
 auto&& get(emplace_params<Ts...>& params)
 {
-    return std::get<I>(params.ref_storage);
+    return std::forward<std::tuple_element_t<I, std::tuple<Ts...>>>(std::get<I>(params.ref_storage));
 }
 
 //=============================================================================
 namespace detail
 {
     template <typename T>
-    class destructively_movable_impl;
+    class optional_v2_impl;
 }
 
 //-----------------------------------------------------------------------------
 // struct tombstone_tag {};
 //
-//  Tag to tell destructively_movable to create Contained type in a tombstoned
-//  state.  Also used in the Is_tombstoned function object to tell Contained
+//  Tag to tell optional_v2 to create Contained type in a tombstoned
+//  state.  Also used in the Tombstone_functions function object to tell Contained
 //  object to mark itself in a tombstoned state.
 struct tombstone_tag {};
 
@@ -164,7 +165,7 @@ struct tombstone_tag {};
 ////
 // Traits to specialise on
 ////
-//  Is_tombstoned (optional overloaded function object type, default external
+//  Tombstone_functions (optional_v2 overloaded function object type, default external
 //  tombstone)
 //
 //   This is an function object, which contains the following two overloads
@@ -181,21 +182,21 @@ struct tombstone_tag {};
 //
 //   The getters are used to confirm the state in debug mode, and when
 //   determining if there is an object there to delete or assign to a
-//   destructively_movable.  The setters are only used when the
-//   destructively_movable object is initialised with the tombstone_tag object
+//   optional_v2.  The setters are only used when the
+//   optional_v2 object is initialised with the tombstone_tag object
 //   (means that the type is not constructed at definition).
 //
 //   When the contents of an object is moved, the getter must return false.
 //   This state doesn't invalidate the "valid but otherwise indeterminate
 //   state" mantra.  This tombstoned state is part of that state.  If,
 //   however, the Contained class is never used without the
-//   destructively_movable template wrapper, then it is concievable that one
+//   optional_v2 template wrapper, then it is concievable that one
 //   could programme the a move such that the only valid operation is to query
 //   the tombstone state, and any attempt to destruct the object would result
 //   in UB.
 //
 ////
-//  is_destructive_move_disabled (optional constexpr static bool, default false)
+//  is_destructive_move_disabled (optional_v2 constexpr static bool, default false)
 //
 //   Specifies if the object doesn't like being "dropped on the floor" after a
 //   move operation.  This really shouldn't be necessary, but some types just
@@ -204,7 +205,7 @@ struct tombstone_tag {};
 //   workaround is a necessary evil.
 //
 ////
-//  destructive_move_exempt (optional constexpr static auto, default empty)
+//  destructive_move_exempt (optional_v2 constexpr static auto, default empty)
 //
 //   This is a means to specify members that are to be excempt from having
 //   their internals being "dropped on the floor":
@@ -223,7 +224,7 @@ struct tombstone_tag {};
 template <typename T>
 struct destructively_movable_traits
 {
-    using Is_tombstoned = void;
+    using Tombstone_functions = void;
     // static constexpr bool is_destructive_move_disabled = true;
     // static constexpr auto destructive_move_exempt = afh::destructive_move_exempt(&X::m_i, &X::m_j);
 };
@@ -244,8 +245,9 @@ namespace detail {
             destruct(obj.*member);
         }
     };
+    // deduction guide
     template<typename T>
-    Destruct_item(T&)->Destruct_item<T>;
+    Destruct_item(T&) -> Destruct_item<T>;
 
     template <typename T, typename Take_from>
     struct Destruct_tuple_references {
@@ -261,6 +263,8 @@ namespace detail {
             static_assert(noexcept(for_each(Take_from::destructive_move_exempt, fn)), "Destructors shouldn't throw.");
             for_each(Take_from::destructive_move_exempt, fn);
         }
+
+        static constexpr bool is_empty = std::tuple_size_v<decltype(Take_from::destructive_move_exempt)> = 0;
     };
 
     template <typename T, typename = void>
@@ -271,10 +275,13 @@ namespace detail {
         , std::void_t<decltype(T::destructive_move_exempt)>
     > : std::true_type {};
 
+    // default - do nothing
     template <typename T, typename = void>
     struct destruct_impl {
         void operator()(T& obj) noexcept {
         }
+
+        static constexpr bool is_empty = true;
     };
 
     // Can exist in destructively_movable_traits<T> or T.  If exists in both,
@@ -295,26 +302,27 @@ namespace detail {
     };
 }
 template <typename T>
-using destructively_movable_destruct = detail::destruct_impl<T>;
+using optional_v2_destruct = detail::destruct_impl<T>;
 
 //-----------------------------------------------------------------------------
 namespace detail {
     template <typename Take_from>
-    struct Is_tombstoned
+    struct tombstone_functions
     {
-        using type = typename Take_from::Is_tombstoned;
+        using type = typename Take_from::Tombstone_functions;
     };
 
     template <typename T, typename = void>
-    struct has_is_tombstone : std::false_type {};
+    struct has_is_tombstone_functions : std::false_type {};
 
     template <typename T>
-    struct has_is_tombstone<T
+    struct has_is_tombstone_functions<T
         , std::void_t<typename T::Is_tombstone>
     > : std::true_type {};
 
+    // default
     template <typename T, typename = void>
-    struct is_tombstoned_impl
+    struct is_tombstone_functions_impl
     {
         using type = void;
     };
@@ -322,22 +330,25 @@ namespace detail {
     // Can exist in destructively_movable_traits<T> or T.  If exists in both,
     // the one in T overrides.
     template <typename T>
-    struct is_tombstoned_impl<T, std::enable_if_t<
-        has_is_tombstone<T>::value
-    >> : Is_tombstoned<T>
+    struct is_tombstone_functions_impl<T, std::enable_if_t<
+        has_is_tombstone_functions<T>::value
+    >> : tombstone_functions<T>
     {
     };
 
     template <typename T>
-    struct is_tombstoned_impl<T, std::enable_if_t<
-        !has_is_tombstone<T>::value
-        && has_is_tombstone<destructively_movable_traits<T>>::value
-    >> : Is_tombstoned<destructively_movable_traits<T>>
+    struct is_tombstone_functions_impl<T, std::enable_if_t<
+        !has_is_tombstone_functions<T>::value
+        && has_is_tombstone_functions<destructively_movable_traits<T>>::value
+    >> : tombstone_functions<destructively_movable_traits<T>>
     {
     };
 }
+// By default, if there is no is_destructive_move_disabled trait defined in
+// either the destructively_movable_traits<type> or the type itself, then
+// it wil be set to true.
 template <typename T>
-using destructively_movable_is_tombstoned = typename detail::is_tombstoned_impl<T>::type;
+using optional_v2_tombstone_functions = typename detail::is_tombstone_functions_impl<T>::type;
 
 //-----------------------------------------------------------------------------
 namespace detail {
@@ -354,6 +365,7 @@ namespace detail {
         , std::void_t<decltype(T::is_destructive_move_disabled)>
     > : std::bool_constant<T::is_destructive_move_disabled> {};
 
+    // default
     template <typename T, typename = void>
     struct is_destructive_move_disabled_impl
     {
@@ -377,6 +389,9 @@ namespace detail {
     {
     };
 }
+// By default, if there is no is_destructive_move_disabled trait defined in
+// either the destructively_movable_traits<type> or the type itself, then
+// it wil be set to true.  E.g. cannot destructively move that object type.
 template <typename T>
 constexpr bool is_destructive_move_disabled = detail::is_destructive_move_disabled_impl<T>::value;
 
@@ -411,7 +426,7 @@ constexpr auto destructive_move_exempt(MT C::* mp, Ts...args)
 
 //-----------------------------------------------------------------------------
 // template <typename Contained>
-// class destructively_movable;
+// class optional_v2;
 //
 //  The will create a destructively movable container for an object.  This
 //  means if this object is moved, the container's contents is also moved. Then
@@ -419,6 +434,8 @@ constexpr auto destructive_move_exempt(MT C::* mp, Ts...args)
 //  contained object.  This can have performance benifits if the Contained
 //  destructor has to call other destructors for other objects that it
 //  contains, either iteratively or recersively.
+//
+//  Turns out that I made a glorified std::optional_v2 type.
 //
 ////
 // Template Parameters
@@ -430,30 +447,30 @@ constexpr auto destructive_move_exempt(MT C::* mp, Ts...args)
 ////
 // Constructors
 ////
-//  destructively_movable::destructively_movable(Contained      && object_to_move_from);
-//  destructively_movable::destructively_movable(Contained const & object_to_copy_from);
+//  optional_v2::optional_v2(Contained      && object_to_move_from);
+//  optional_v2::optional_v2(Contained const & object_to_copy_from);
 //
-//   Forwards to destructively_movable_impl::destructively_movable_impl(...).
+//   Forwards to optional_v2_impl::optional_v2_impl(...).
 ////
 //  template<typename...Ts>
-//  destructively_movable_impl::destructively_movable_impl(Ts&&...args);
+//  optional_v2_impl::optional_v2_impl(Ts&&...args);
 //
-//   Forwards to destructively_movable_impl::construct(...).
+//   Forwards to optional_v2_impl::construct(...).
 ////
-//  destructively_movable_impl::destructively_movable_impl(tombstone_tag);
+//  optional_v2_impl::optional_v2_impl(tombstone_tag);
 //
 //   Marks the contained object space or external marker as invalid.
 ////
 //  template <typename...Ts>
-//  Derived* destructively_movable_impl::construct(Ts&&...args)
+//  Derived* optional_v2_impl::construct(Ts&&...args)
 //
-//   Forwards to destructively_movable_impl::construct(emplace_params<Contained, Ts>(...).
+//   Forwards to optional_v2_impl::construct(emplace_params<Contained, Ts>(...).
 ////
 //  template <typename T, typename const_tag, typename...Ts
 //      , std::enable_if_t<
 //          std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
 //      , int> = 0>
-//  Derived* destructively_movable_impl::construct(emplace_params<T, const_tag, Ts...>&& emplace)
+//  Derived* optional_v2_impl::construct(emplace_params<T, const_tag, Ts...>&& emplace)
 ////
 //   Constructes Contained, or any type that is derived from Contained that is
 //   the same size as Contained.
@@ -462,18 +479,18 @@ constexpr auto destructive_move_exempt(MT C::* mp, Ts...args)
 //      , std::enable_if_t<
 //          std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
 //      , int> = 0>
-//  Derived* destructively_movable_impl::construct(emplace_params<T, Ts...> const& emplace)
+//  Derived* optional_v2_impl::construct(emplace_params<T, Ts...> const& emplace)
 //   Constructes Contained, or any type that is derived from Contained that is
 //   the same size as Contained.
 //
 ////
 // Destructors
 ////
-//  destructively_movable_impl::~destructively_movable_impl()
+//  optional_v2_impl::~optional_v2_impl()
 //
 //   Calls destructor on Contained only if is_tombstoned() is true.
 //
-//  void destructively_movable_impl::destruct()
+//  void optional_v2_impl::destruct()
 //
 //   Calls destructor on Contained object. is_tombstoned() must be true before
 //   calling this function.
@@ -481,26 +498,26 @@ constexpr auto destructive_move_exempt(MT C::* mp, Ts...args)
 ////
 // Assignment
 ////
-//  template <typename T> auto&& destructively_movable_impl::operator=(T&& rhs)          & ;
-//  template <typename T> auto&& destructively_movable_impl::operator=(T&& rhs) volatile & ;
+//  template <typename T> auto&& optional_v2_impl::operator=(T&& rhs)          & ;
+//  template <typename T> auto&& optional_v2_impl::operator=(T&& rhs) volatile & ;
 //
 //   Assigns lrvalue reference object of type T to the lvalue Contained object.
 //
-//  template <typename T> auto&& destructively_movable_impl::operator=(T&& rhs)          &&;
-//  template <typename T> auto&& destructively_movable_impl::operator=(T&& rhs) volatile &&;
+//  template <typename T> auto&& optional_v2_impl::operator=(T&& rhs)          &&;
+//  template <typename T> auto&& optional_v2_impl::operator=(T&& rhs) volatile &&;
 //
 //   Assigns lrvalue reference object of type T to the rvalue Contained object.
 //
 ////
 // Validity (is object constructed)
 ////
-//  void destructively_movable_impl::is_tombstoned()           const          noexcept;
-//  void destructively_movable_impl::is_tombstoned()           const volitile noexcept;
+//  void optional_v2_impl::is_tombstoned()           const          noexcept;
+//  void optional_v2_impl::is_tombstoned()           const volitile noexcept;
 //
 //   Returns if the Contained object is constructed.
 //
-//  bool destructively_movable_impl::has_been_moved()          noexcept;
-//  bool destructively_movable_impl::has_been_moved() volatile noexcept;
+//  bool optional_v2_impl::has_been_moved()          noexcept;
+//  bool optional_v2_impl::has_been_moved() volatile noexcept;
 //
 //   If it's known that the object has actually been moved without the
 //   container's knowledge, then call has_been_moved().  In debug, it will
@@ -615,52 +632,52 @@ constexpr auto destructive_move_exempt(MT C::* mp, Ts...args)
 //     and other places (such as making a move constructor to be not marked
 //     as noexcept because of allocating of memory *cough-cough*).
 template <typename Contained, typename Enabled = void>
-class destructively_movable
-    : public detail::destructively_movable_impl<Contained>
+class optional_v2
+    : public detail::optional_v2_impl<Contained>
 {
-    using base = detail::destructively_movable_impl<Contained>;
+    using base = detail::optional_v2_impl<Contained>;
 public:
     // Note: By defining the copy/move constructor/assignment operator members
     //       explicitly like this, the base copy constructor/assignmnt
     //       operator members are ignored since the templated constructor/
     //       assigment that take a universal reference is a better match.
-    //       (destructively_movable const& over destructively_movable_impl
+    //       (optional_v2 const& over optional_v2_impl
     //       const&).  The only way to call that copy constructor is to
     //       instantiate the base class directly, or explicitly call the
     //       assignment operator, if they existed.  However they've been
     //       deleted those anyway if someone were so inclided.
-    destructively_movable(destructively_movable     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
-    destructively_movable(destructively_movable const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
+    optional_v2(optional_v2     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
+    optional_v2(optional_v2 const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
 
-    destructively_movable&  operator=(destructively_movable     && obj)          &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
-    destructively_movable&  operator=(destructively_movable const& obj)          &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
-    destructively_movable&  operator=(destructively_movable     && obj) volatile &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
-    destructively_movable&  operator=(destructively_movable const& obj) volatile &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    optional_v2&  operator=(optional_v2     && obj)          &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    optional_v2&  operator=(optional_v2 const& obj)          &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    optional_v2&  operator=(optional_v2     && obj) volatile &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    optional_v2&  operator=(optional_v2 const& obj) volatile &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
 
     // Does it even make sense to assign to a rvalue?  Limited value?
-    destructively_movable&& operator=(destructively_movable     && obj)          && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
-    destructively_movable&& operator=(destructively_movable const& obj)          && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
-    destructively_movable&& operator=(destructively_movable     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
-    destructively_movable&& operator=(destructively_movable const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    optional_v2&& operator=(optional_v2     && obj)          && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    optional_v2&& operator=(optional_v2 const& obj)          && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    optional_v2&& operator=(optional_v2     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    optional_v2&& operator=(optional_v2 const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
 
-    void is_tombstoned(bool value)                noexcept { assert(!value);        Is_tombstoned(*this, tombstone_tag()); }
-    void is_tombstoned(bool value)       volatile noexcept { assert(!value);        Is_tombstoned(*this, tombstone_tag()); }
-    bool is_tombstoned(          ) const          noexcept {                 return Is_tombstoned(*this); }
-    bool is_tombstoned(          ) const volatile noexcept {                 return Is_tombstoned(*this); }
+    void is_tombstoned(bool value)                noexcept { assert(!value);        Tombstone_functions(*this, tombstone_tag()); }
+    void is_tombstoned(bool value)       volatile noexcept { assert(!value);        Tombstone_functions(*this, tombstone_tag()); }
+    bool is_tombstoned(          ) const          noexcept {                 return Tombstone_functions(*this); }
+    bool is_tombstoned(          ) const volatile noexcept {                 return Tombstone_functions(*this); }
 
     using base::base;
 };
 
 template <typename Contained>
-class destructively_movable<Contained
+class optional_v2<Contained
     , std::enable_if_t<
         std::is_trivially_destructible_v<Contained>
-        && std::is_void_v<destructively_movable_is_tombstoned<Contained>>
+        && std::is_void_v<optional_v2_tombstone_functions<Contained>>
     >
 >
-    : public detail::destructively_movable_impl<Contained>
+    : public detail::optional_v2_impl<Contained>
 {
-    using base = detail::destructively_movable_impl<Contained>;
+    using base = detail::optional_v2_impl<Contained>;
 public:
     // This copy/move constructor is needed because on copying/moving,
     // m_isTombstoned will be updated after is was already set by the
@@ -671,24 +688,24 @@ public:
     //       explicitly like this, the base copy constructor/assignmnt
     //       operator members are ignored since the templated constructor/
     //       assigment that take a universal reference is a better match.
-    //       (destructively_movable const& over destructively_movable_impl
+    //       (optional_v2 const& over optional_v2_impl
     //       const&).  The only way to call that copy constructor is to
     //       instantiate the base class directly, or explicitly call the
     //       assignment operator, if they existed.  However they've been
     //       deleted those anyway if someone were so inclided.
-    destructively_movable(destructively_movable     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
-    destructively_movable(destructively_movable const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
+    optional_v2(optional_v2     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
+    optional_v2(optional_v2 const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
 
-    destructively_movable&  operator=(destructively_movable const& obj)          &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
-    destructively_movable&  operator=(destructively_movable     && obj)          &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
-    destructively_movable&  operator=(destructively_movable const& obj) volatile &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
-    destructively_movable&  operator=(destructively_movable     && obj) volatile &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    optional_v2&  operator=(optional_v2 const& obj)          &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    optional_v2&  operator=(optional_v2     && obj)          &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    optional_v2&  operator=(optional_v2 const& obj) volatile &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    optional_v2&  operator=(optional_v2     && obj) volatile &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
 
     // Does it even make sense to assign to a rvalue?  Limited value?
-    destructively_movable&& operator=(destructively_movable const& obj)          && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
-    destructively_movable&& operator=(destructively_movable     && obj)          && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
-    destructively_movable&& operator=(destructively_movable const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
-    destructively_movable&& operator=(destructively_movable     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    optional_v2&& operator=(optional_v2 const& obj)          && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    optional_v2&& operator=(optional_v2     && obj)          && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    optional_v2&& operator=(optional_v2 const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    optional_v2&& operator=(optional_v2     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
 
     void is_tombstoned(bool value)                noexcept {        }
     void is_tombstoned(bool value)       volatile noexcept {        }
@@ -699,15 +716,15 @@ public:
 };
 
 template <typename Contained>
-class destructively_movable<Contained
+class optional_v2<Contained
     , std::enable_if_t<
         !std::is_trivially_destructible_v<Contained>
-        && std::is_void_v<destructively_movable_is_tombstoned<Contained>>
+        && std::is_void_v<optional_v2_tombstone_functions<Contained>>
     >
 >
-    : public detail::destructively_movable_impl<Contained>
+    : public detail::optional_v2_impl<Contained>
 {
-    using base = detail::destructively_movable_impl<Contained>;
+    using base = detail::optional_v2_impl<Contained>;
     bool m_isTombstoned;
 public:
     // This copy/move constructor is needed because on copying/moving,
@@ -719,24 +736,24 @@ public:
     //       explicitly like this, the base copy constructor/assignmnt
     //       operator members are ignored since the templated constructor/
     //       assigment that take a universal reference is a better match.
-    //       (destructively_movable const& over destructively_movable_impl
+    //       (optional_v2 const& over optional_v2_impl
     //       const&).  The only way to call that copy constructor is to
     //       instantiate the base class directly, or explicitly call the
     //       assignment operator, if they existed.  However they've been
     //       deleted those anyway if someone were so inclided.
-    destructively_movable(destructively_movable     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
-    destructively_movable(destructively_movable const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
+    optional_v2(optional_v2     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
+    optional_v2(optional_v2 const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
 
-    destructively_movable&  operator=(destructively_movable const& obj)          &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
-    destructively_movable&  operator=(destructively_movable     && obj)          &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
-    destructively_movable&  operator=(destructively_movable const& obj) volatile &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
-    destructively_movable&  operator=(destructively_movable     && obj) volatile &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    optional_v2&  operator=(optional_v2 const& obj)          &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    optional_v2&  operator=(optional_v2     && obj)          &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    optional_v2&  operator=(optional_v2 const& obj) volatile &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    optional_v2&  operator=(optional_v2     && obj) volatile &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
 
     // Does it even make sense to assign to a rvalue?  Limited value?
-    destructively_movable&& operator=(destructively_movable const& obj)          && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
-    destructively_movable&& operator=(destructively_movable     && obj)          && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
-    destructively_movable&& operator=(destructively_movable const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
-    destructively_movable&& operator=(destructively_movable     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    optional_v2&& operator=(optional_v2 const& obj)          && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    optional_v2&& operator=(optional_v2     && obj)          && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    optional_v2&& operator=(optional_v2 const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    optional_v2&& operator=(optional_v2     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
 
     void is_tombstoned(bool value)                noexcept {        m_isTombstoned = value; }
     void is_tombstoned(bool value)       volatile noexcept {        m_isTombstoned = value; }
@@ -747,16 +764,19 @@ public:
 };
 
 template <typename T>
-struct is_destructively_movable : std::false_type {};
+struct is_optional_v2 : std::false_type {};
 
 template <typename T, typename I>
-struct is_destructively_movable<destructively_movable<T, I>> : std::true_type {};
+struct is_optional_v2<optional_v2<T, I>> : std::true_type {};
 
 template <typename T>
-using is_destructively_movable_t = is_destructively_movable<T>;
+using is_optional_v2_t = is_optional_v2<T>;
+
+template <typename T>
+constexpr bool is_optional_v2_v = is_optional_v2<T>::value;
 
 namespace detail {
-template <size_t Size>
+template <std::size_t Size>
 class storage
 {
     std::byte m_storage[Size];
@@ -768,14 +788,14 @@ class storage<0>
 };
 
 template <typename Contained>
-class alignas(Contained) destructively_movable_impl
+class alignas(Contained) optional_v2_impl
     : private storage<std::is_empty<Contained>::value ? 0 : sizeof(Contained)>
 {
-    static_assert(afh::is_destructive_move_disabled<Contained>, "Cannot wrap Contained in a destructively_movable template as it is marked disabled");
+    static_assert(afh::is_destructive_move_disabled<Contained>, "Cannot wrap Contained in a optional_v2 template as it is marked disabled");
 
-    using Derived  = destructively_movable<Contained>;
-    static constexpr bool has_tombstone = !std::is_void_v<destructively_movable_is_tombstoned<Contained>>;
-    using Destruct_tuple_references = destructively_movable_destruct<Contained>;
+    using Derived  = optional_v2<Contained>;
+    static constexpr bool has_tombstone = !std::is_void_v<optional_v2_tombstone_functions<Contained>>;
+    using Destruct_tuple_references = optional_v2_destruct<Contained>;
 
     Derived                * derived()                noexcept { return static_cast<Derived                *>(this); }
     Derived       volatile * derived()       volatile noexcept { return static_cast<Derived       volatile *>(this); }
@@ -798,10 +818,10 @@ class alignas(Contained) destructively_movable_impl
             );
     }
 
-    static constexpr bool has_external_tombstone = std::is_same<Derived, destructively_movable<Contained, void>>::value;
+    static constexpr bool has_external_tombstone = std::is_same<Derived, optional_v2<Contained, void>>::value;
 
     template <typename T> struct bare_type_impl                           { using type = T; };
-    template <typename T> struct bare_type_impl<destructively_movable<T>> { using type = T; };
+    template <typename T> struct bare_type_impl<optional_v2<T>> { using type = T; };
 
     // Strips and extract the wrapped type or if not wrapped, just return the type.
     template <typename T> using  bare_t = typename bare_type_impl<strip_t<T>>::type;
@@ -813,7 +833,7 @@ class alignas(Contained) destructively_movable_impl
     {
         if constexpr (sizeof...(Ts) == 1) {
             using T = strip_t<std::tuple_element_t<0, std::tuple<Ts...>>>;
-            if constexpr (is_destructively_movable<T>::value)
+            if constexpr (is_optional_v2<T>::value)
             {
                 if constexpr (std::is_same<Contained, typename T::contained>::value)
                 {
@@ -824,12 +844,12 @@ class alignas(Contained) destructively_movable_impl
         return false;
     }
 
-    destructively_movable_impl(destructively_movable_impl const&) = delete;
-    destructively_movable_impl& operator=(destructively_movable_impl const&) = delete;
+    optional_v2_impl(optional_v2_impl const&) = delete;
+    optional_v2_impl& operator=(optional_v2_impl const&) = delete;
 public:
     using contained = Contained;
 
-    destructively_movable_impl(tombstone_tag) noexcept {
+    optional_v2_impl(tombstone_tag) noexcept {
         if constexpr (!is_trivially_destructible_without_tombstone) {
             is_tombstoned(false);
         }
@@ -837,7 +857,7 @@ public:
     }
 
     template <typename...Ts>
-    destructively_movable_impl(Ts&&...args) noexcept(noexcept(
+    optional_v2_impl(Ts&&...args) noexcept(noexcept(
         construct(std::forward<Ts>(args)...)
     ))
     {
@@ -868,10 +888,10 @@ public:
     // construction".
     //
     // NOTE: Neither move or copy constructors would actually be called because
-    //       this class is never passed a destructively_movable_impl const& or
-    //       destructively_movable_impl&& directly anyway, since the derived
-    //       class explicitly passes a destructively_movable const& or
-    //       destructively_movable&& respectively.
+    //       this class is never passed a optional_v2_impl const& or
+    //       optional_v2_impl&& directly anyway, since the derived
+    //       class explicitly passes a optional_v2 const& or
+    //       optional_v2&& respectively.
     template <typename...Ts>
     Derived* construct(Ts&&...args)
         noexcept(
@@ -898,7 +918,7 @@ public:
         emplace.uninitialized_construct(this)
     ))
     {
-        //OUTPUT_THIS_FUNC;
+        //AFH__OUTPUT_THIS_FUNC;
         emplace.uninitialized_construct(this);
         if constexpr (!is_trivially_destructible_without_tombstone && has_external_tombstone) {
             // = (has_tombstone && has_external_tombstone || !trivially_destructable && has_external_tombstone)
@@ -914,7 +934,7 @@ public:
                 // Moved and has external tombstone, so exlicitly clear.
                 value.is_tombstoned(false);
             }
-            // Operation was a move on a destructively_movable object.
+            // Operation was a move on a optional_v2 object.
             assert(is_trivially_destructible_without_tombstone || !value.is_tombstoned());
         }
         return static_cast<Derived*>(this);
@@ -935,7 +955,7 @@ public:
         emplace.uninitialized_construct(this)
     ))
     {
-        OUTPUT_THIS_FUNC;
+        AFH__OUTPUT_THIS_FUNC;
         emplace.uninitialized_construct(this);
         if constexpr (!is_trivially_destructible_without_tombstone && has_external_tombstone) {
             is_tombstoned(true);
@@ -944,7 +964,9 @@ public:
         return static_cast<Derived*>(this);
     }
 
-    ~destructively_movable_impl()
+    // TODO: Going to have to flip code between destructor and destruct(),
+    //       or into a 3rd fn, otherwise, this will prolly result in UB.
+    ~optional_v2_impl()
     {
         if constexpr (!is_trivially_destructible_without_tombstone) {
             if (is_tombstoned()) {
@@ -959,12 +981,14 @@ public:
     void destruct()
     {
         assert(is_trivially_destructible_without_tombstone || is_tombstoned());
-        this->~destructively_movable_impl();
+        this->~optional_v2_impl();
         if constexpr (!is_trivially_destructible_without_tombstone && has_external_tombstone) {
             is_tombstoned(false);
         }
         assert(is_trivially_destructible_without_tombstone || !is_tombstoned());
     }
+
+    static constexpr bool has_nothing_to_destruct_after_move = Destruct_tuple_references::is_empty;
 
     void has_been_moved() volatile noexcept
     {
@@ -994,7 +1018,7 @@ private:
     // slightly easier noexcept spec, though need to refer to caller to see
     // what std::true_type/std::false_type tag means without comment.
 
-    // moving destructively_movable rvalue referenced wrapped type.
+    // moving optional_v2 rvalue referenced wrapped type.
     template <typename T, typename U>
     static auto&& assign(T&& lhs, U&& rhs, std::true_type)
         noexcept(
@@ -1024,7 +1048,7 @@ private:
         return fwd_like<T>(static_cast<Derived&>(lhs));
     }
 
-    // copying non-destructively_movable wrapped reference or lvalue reference type.
+    // copying non-optional_v2 wrapped reference or lvalue reference type.
     template <typename T, typename U>
     static auto&& assign(T&& lhs, U&& rhs, std::false_type)
         noexcept(
@@ -1039,7 +1063,7 @@ private:
         else {
             lhs.construct(std::forward<U>(rhs));
         }
-        assert(lhs.is_trivially_destructible_without_tombstone || !is_destructively_movable<U>::value || lhs.is_tombstoned());
+        assert(lhs.is_trivially_destructible_without_tombstone || !is_optional_v2<U>::value || lhs.is_tombstoned());
         return fwd_like<T>(static_cast<Derived&>(lhs));
     }
 
@@ -1051,10 +1075,10 @@ private:
     template <typename T, typename U>
     static auto&& assign(T&& lhs, U&& rhs)
         noexcept(noexcept(
-            assign(std::forward<T>(lhs), std::forward<U>(rhs), is_destructively_movable_t<std::remove_reference_t<U>>{})
+            assign(std::forward<T>(lhs), std::forward<U>(rhs), is_optional_v2_t<std::remove_reference_t<U>>{})
         ))
     {
-        return assign(std::forward<T>(lhs), std::forward<U>(rhs), is_destructively_movable_t<std::remove_reference_t<U>>{});
+        return assign(std::forward<T>(lhs), std::forward<U>(rhs), is_optional_v2_t<std::remove_reference_t<U>>{});
     }
 
 public:
@@ -1139,7 +1163,7 @@ public:
 // NOTE: Using ... instead of a named parameter because when
 //       enabler(const_volatile) is called with const_volatile being blank (no
 //       cv), VC++ complains.
-// NOTE: Disabling binding to std::nullptr_t to allow INTEROGATE_TYPE() macro to work properly.
+// NOTE: Disabling binding to std::nullptr_t to allow AFH__INTEROGATE_TYPE() macro to work properly.
 #define ENABLE_IF_NOT_NULLPTR_T(...) (!std::is_same_v<afh::strip_t<U>, std::nullptr_t>)
 #define IS_CV_STRONGER_OR_SAME(...)  (is_stronger_or_same_cv_v<U, int __VA_ARGS__> && ENABLE_IF_NOT_NULLPTR_T())
 
