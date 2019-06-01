@@ -258,6 +258,14 @@ void for_each(std::tuple<Ts...> const& tuple, Body&& body)
     detail::for_each_impl(tuple, body, std::make_index_sequence<sizeof...(Ts)>{});
 }
 
+// template <typename T>
+// struct member_type;
+// 
+// template <typename MT, typename C>
+// struct member_type<MT C::*>
+//
+//  If T is a member pointer, then type is the member's type, otherwise it is
+//  void.
 template <typename T>
 struct member_type {
     using type = void;
@@ -274,27 +282,28 @@ using member_type_t = typename member_type<T>::type;
 
 // Helper macro
 #define AFH___GET_P(p, c, m) \
-    reinterpret_cast<member_type<decltype(&c::m)>*>(reinterpret_cast<char*>(p) + offset(c, m))
+    (reinterpret_cast<char*>(p) + offset(c, m))
 
-// Sets within an uninitialised memory area [p, p+1), as if c were to have been
-// constructed at p, the member c::m to the value v.
+// Sets value from within an uninitialised memory area [p, p+1), as if c were
+// to have been constructed at p, with the member c::m set to the value v.
 //
 // NOTE: This only would work if member m is accessible (either public, or set
 //       from a function that is a friend or is protected and set from a member
 //       function that inherits from class c, or from within class c).
 // NOTE: Don't use this on a member that holds onto *ANY* resources when
-//       initialised.
+//       initialised, as it will get overwritten when an actual object of type
+//       c is instantiated.
 #define AFH___SET(p, c, m, v) \
-    new (AFH___GET_P(p, c, m)) member_type<decltype(&c::m)>(v)
+    (*new (AFH___GET_P(p, c, m)) member_type<decltype(&c::m)>(v))
 
-// Gets within partially initialised memory area [p, p+1), as if c were to have
-// been constructed at p, the member c::m.  C++ object model states that
-// something must have been initialised there, so use AFH___SET() macro to do
-// that first.
+// Gets value from within partially initialised memory area [p, p+1), as if c
+// were to have been constructed at p, returns the value of member c::m.  C++
+// object model states that something must have been initialised there, so use
+// AFH___SET() macro to do that first.
 //
 // NOTE: See restrictions in AFH___SET() macro.
 #define AFH___GET(p, c, m) \
-    *std::launder(AFH___GET_P(p, c, m))
+    (*std::launder(reinterpret_cast<member_type<decltype(&c::m)>*>(AFH___GET_P(p, c, m))))
 
 } // namespace afh
 #endif // #ifndef AFH___UTILITY_HPP
