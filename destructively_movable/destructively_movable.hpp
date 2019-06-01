@@ -165,7 +165,7 @@ struct tombstone_tag {};
 ////
 // Traits to specialise on
 ////
-//  Tombstone_functions (optional_v2 overloaded function object type, default external
+//  Tombstone_functions (optional overloaded function object type, default external
 //  tombstone)
 //
 //   This is an function object, which contains the following two overloads
@@ -196,7 +196,7 @@ struct tombstone_tag {};
 //   in UB.
 //
 ////
-//  is_destructive_move_disabled (optional_v2 constexpr static bool, default false)
+//  is_destructive_move_disabled (optional constexpr static bool, default false)
 //
 //   Specifies if the object doesn't like being "dropped on the floor" after a
 //   move operation.  This really shouldn't be necessary, but some types just
@@ -205,7 +205,7 @@ struct tombstone_tag {};
 //   workaround is a necessary evil.
 //
 ////
-//  destructive_move_exempt (optional_v2 constexpr static auto, default empty)
+//  destructive_move_exempt (optional constexpr static auto, default empty)
 //
 //   This is a means to specify members that are to be excempt from having
 //   their internals being "dropped on the floor":
@@ -250,7 +250,7 @@ namespace detail {
     Destruct_item(T&) -> Destruct_item<T>;
 
     template <typename T, typename Take_from>
-    struct Destruct_tuple_references {
+    struct Destruct_exempt_members {
         void operator()(T& obj) noexcept(noexcept(for_each(Take_from::destructive_move_exempt, Destruct_item{ obj }))) {
             // clang++ is having issues with the noexcept clause for lambdas
             // causing it to crash.  Works fine for a functor.
@@ -277,7 +277,7 @@ namespace detail {
 
     // default - do nothing
     template <typename T, typename = void>
-    struct destruct_impl {
+    struct get_destruct_exempt_members {
         void operator()(T& obj) noexcept {
         }
 
@@ -287,22 +287,22 @@ namespace detail {
     // Can exist in destructively_movable_traits<T> or T.  If exists in both,
     // the one in T overrides.
     template <typename T>
-    struct destruct_impl<T, std::enable_if_t<
+    struct get_destruct_exempt_members<T, std::enable_if_t<
         has_destructive_move_exempt<T>::value
-    >> : Destruct_tuple_references<T, T>
+    >> : Destruct_exempt_members<T, T>
     {
     };
 
     template <typename T>
-    struct destruct_impl<T, std::enable_if_t<
+    struct get_destruct_exempt_members<T, std::enable_if_t<
         !has_destructive_move_exempt<T>::value
         && has_destructive_move_exempt<destructively_movable_traits<T>>::value
-    >> : Destruct_tuple_references<T, destructively_movable_traits<T>>
+    >> : Destruct_exempt_members<T, destructively_movable_traits<T>>
     {
     };
 }
 template <typename T>
-using optional_v2_destruct = detail::destruct_impl<T>;
+using optional_v2_destruct = detail::get_destruct_exempt_members<T>;
 
 //-----------------------------------------------------------------------------
 namespace detail {
@@ -313,16 +313,16 @@ namespace detail {
     };
 
     template <typename T, typename = void>
-    struct has_is_tombstone_functions : std::false_type {};
+    struct has_tombstone_functions : std::false_type {};
 
     template <typename T>
-    struct has_is_tombstone_functions<T
+    struct has_tombstone_functions<T
         , std::void_t<typename T::Is_tombstone>
     > : std::true_type {};
 
     // default
     template <typename T, typename = void>
-    struct is_tombstone_functions_impl
+    struct get_tombstone_functions
     {
         using type = void;
     };
@@ -330,16 +330,16 @@ namespace detail {
     // Can exist in destructively_movable_traits<T> or T.  If exists in both,
     // the one in T overrides.
     template <typename T>
-    struct is_tombstone_functions_impl<T, std::enable_if_t<
-        has_is_tombstone_functions<T>::value
+    struct get_tombstone_functions<T, std::enable_if_t<
+        has_tombstone_functions<T>::value
     >> : tombstone_functions<T>
     {
     };
 
     template <typename T>
-    struct is_tombstone_functions_impl<T, std::enable_if_t<
-        !has_is_tombstone_functions<T>::value
-        && has_is_tombstone_functions<destructively_movable_traits<T>>::value
+    struct get_tombstone_functions<T, std::enable_if_t<
+        !has_tombstone_functions<T>::value
+        && has_tombstone_functions<destructively_movable_traits<T>>::value
     >> : tombstone_functions<destructively_movable_traits<T>>
     {
     };
@@ -348,7 +348,7 @@ namespace detail {
 // either the destructively_movable_traits<type> or the type itself, then
 // it wil be set to true.
 template <typename T>
-using optional_v2_tombstone_functions = typename detail::is_tombstone_functions_impl<T>::type;
+using optional_v2_tombstone_functions = typename detail::get_tombstone_functions<T>::type;
 
 //-----------------------------------------------------------------------------
 namespace detail {
@@ -375,14 +375,14 @@ namespace detail {
     // Can exist in destructively_movable_traits<T> or T.  If exists in both,
     // the one in T overrides.
     template <typename T>
-    struct destruct_impl<T, std::enable_if_t<
+    struct is_destructive_move_disabled_impl<T, std::enable_if_t<
         has_is_destructive_move_disabled<T>::value
     >> : is_destructive_move_disabled<T>
     {
     };
 
     template <typename T>
-    struct destruct_impl<T, std::enable_if_t<
+    struct is_destructive_move_disabled_impl<T, std::enable_if_t<
         !has_is_destructive_move_disabled<T>::value
         && has_is_destructive_move_disabled<destructively_movable_traits<T>>::value
     >> : is_destructive_move_disabled<destructively_movable_traits<T>>
@@ -435,7 +435,7 @@ constexpr auto destructive_move_exempt(MT C::* mp, Ts...args)
 //  destructor has to call other destructors for other objects that it
 //  contains, either iteratively or recersively.
 //
-//  Turns out that I made a glorified std::optional_v2 type.
+//  Turns out that I made a glorified std::optional type.
 //
 ////
 // Template Parameters
@@ -455,22 +455,22 @@ constexpr auto destructive_move_exempt(MT C::* mp, Ts...args)
 //  template<typename...Ts>
 //  optional_v2_impl::optional_v2_impl(Ts&&...args);
 //
-//   Forwards to optional_v2_impl::construct(...).
+//   Forwards to optional_v2_impl::emplace(...).
 ////
 //  optional_v2_impl::optional_v2_impl(tombstone_tag);
 //
 //   Marks the contained object space or external marker as invalid.
 ////
 //  template <typename...Ts>
-//  Derived* optional_v2_impl::construct(Ts&&...args)
+//  optional_v2* optional_v2_impl::emplace(Ts&&...args)
 //
-//   Forwards to optional_v2_impl::construct(emplace_params<Contained, Ts>(...).
+//   Forwards to optional_v2_impl::emplace(emplace_params<Contained, Ts>(...).
 ////
 //  template <typename T, typename const_tag, typename...Ts
 //      , std::enable_if_t<
 //          std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
 //      , int> = 0>
-//  Derived* optional_v2_impl::construct(emplace_params<T, const_tag, Ts...>&& emplace)
+//  optional_v2* optional_v2_impl::emplace(emplace_params<T, const_tag, Ts...>&& emplace)
 ////
 //   Constructes Contained, or any type that is derived from Contained that is
 //   the same size as Contained.
@@ -479,7 +479,7 @@ constexpr auto destructive_move_exempt(MT C::* mp, Ts...args)
 //      , std::enable_if_t<
 //          std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
 //      , int> = 0>
-//  Derived* optional_v2_impl::construct(emplace_params<T, Ts...> const& emplace)
+//  optional_v2* optional_v2_impl::emplace(emplace_params<T, Ts...> const& emplace)
 //   Constructes Contained, or any type that is derived from Contained that is
 //   the same size as Contained.
 //
@@ -490,7 +490,7 @@ constexpr auto destructive_move_exempt(MT C::* mp, Ts...args)
 //
 //   Calls destructor on Contained only if is_tombstoned() is true.
 //
-//  void optional_v2_impl::destruct()
+//  void optional_v2_impl::reset()
 //
 //   Calls destructor on Contained object. is_tombstoned() must be true before
 //   calling this function.
@@ -622,7 +622,7 @@ constexpr auto destructive_move_exempt(MT C::* mp, Ts...args)
 //     to the moved object (cou-*MicroSoft*-gh! ;)). In this case, resources
 //     will then leak from the moved from object.
 //
-//     To get around this issue, one can define a destruct_impl type trait in the
+//     To get around this issue, one can define a destruct_exempted_members type trait in the
 //     destructively_movable_traits specialisation for Contained.  This would
 //     have to be implemented for any Contained type that contains types that
 //     have this issue, which is definitely not nice.  This is really a
@@ -776,6 +776,8 @@ template <typename T>
 constexpr bool is_optional_v2_v = is_optional_v2<T>::value;
 
 namespace detail {
+
+// Helper class for storage
 template <std::size_t Size>
 class storage
 {
@@ -785,27 +787,50 @@ class storage
 template <>
 class storage<0>
 {
+    // Stores nothing.
+};
+
+// Helper class for destructor for non-trivial types.
+template <typename Contained, typename = void>
+class destruct_class {
+public:
+    ~destruct_class();
+};
+
+template <typename Contained>
+class destruct_class<Contained, std::enable_if_t<
+        std::is_void_v<optional_v2_tombstone_functions<Contained>> // doesn't have tombstone functions
+        && std::is_trivially_destructible_v<Contained>
+    >
+>
+{
+    // not having a destructor makes this a trivial type
 };
 
 template <typename Contained>
 class alignas(Contained) optional_v2_impl
-    : private storage<std::is_empty<Contained>::value ? 0 : sizeof(Contained)>
+    : storage<std::is_empty<Contained>::value ? 0 : sizeof(Contained)>
+    , destruct_class<Contained>
 {
+    // So that the destrutor can call optional_v2_impl::destruct_exempted_members()
+    template <typename Contained, typename>
+    friend class afh::detail::destruct_class;
+
     static_assert(afh::is_destructive_move_disabled<Contained>, "Cannot wrap Contained in a optional_v2 template as it is marked disabled");
 
-    using Derived  = optional_v2<Contained>;
+    using optional_v2  = ::afh::optional_v2<Contained>;
     static constexpr bool has_tombstone = !std::is_void_v<optional_v2_tombstone_functions<Contained>>;
-    using Destruct_tuple_references = optional_v2_destruct<Contained>;
+    using Destruct_exempt_members = optional_v2_destruct<Contained>;
 
-    Derived                * derived()                noexcept { return static_cast<Derived                *>(this); }
-    Derived       volatile * derived()       volatile noexcept { return static_cast<Derived       volatile *>(this); }
-    Derived const          * derived() const          noexcept { return static_cast<Derived const          *>(this); }
-    Derived const volatile * derived() const volatile noexcept { return static_cast<Derived const volatile *>(this); }
+    optional_v2                * derived()                noexcept { return static_cast<optional_v2                *>(this); }
+    optional_v2       volatile * derived()       volatile noexcept { return static_cast<optional_v2       volatile *>(this); }
+    optional_v2 const          * derived() const          noexcept { return static_cast<optional_v2 const          *>(this); }
+    optional_v2 const volatile * derived() const volatile noexcept { return static_cast<optional_v2 const volatile *>(this); }
 
     static constexpr bool is_trivially_destructible_without_tombstone
         = !has_tombstone && std::is_trivially_destructible_v<Contained>;
     template <typename U>
-    static auto&& object(U&& this_ref) noexcept
+    static auto&& value(U&& this_ref) noexcept
     {
         assert(this_ref.is_trivially_destructible_without_tombstone || this_ref.is_tombstoned());
         return
@@ -818,34 +843,33 @@ class alignas(Contained) optional_v2_impl
             );
     }
 
-    static constexpr bool has_external_tombstone = std::is_same<Derived, optional_v2<Contained, void>>::value;
+    static constexpr bool has_external_tombstone = std::is_same<optional_v2, ::afh::optional_v2<Contained, void>>::value;
 
     template <typename T> struct bare_type_impl                           { using type = T; };
-    template <typename T> struct bare_type_impl<optional_v2<T>> { using type = T; };
+    template <typename T> struct bare_type_impl<::afh::optional_v2<T>> { using type = T; };
 
     // Strips and extract the wrapped type or if not wrapped, just return the type.
     template <typename T> using  bare_t = typename bare_type_impl<strip_t<T>>::type;
     
     template <typename T> using  fwd_to_bare_type_t = fwd_type_t<T, bare_t<T>>;
 
+    // Check if parameter pack Ts consists of one type that is the same as optional_v2.
     template<typename...Ts>
-    static constexpr bool is_destructively_movable_same_contained() noexcept
+    static constexpr bool is_type_same_as_derived() noexcept
     {
         if constexpr (sizeof...(Ts) == 1) {
             using T = strip_t<std::tuple_element_t<0, std::tuple<Ts...>>>;
-            if constexpr (is_optional_v2<T>::value)
-            {
-                if constexpr (std::is_same<Contained, typename T::contained>::value)
-                {
-                    return true;
-                }
-            }
+            return std::is_same_v<T, optional_v2>;
         }
         return false;
     }
 
-    optional_v2_impl(optional_v2_impl const&) = delete;
+    // Want to ensure that these are not called by accedent.
+    optional_v2_impl           (optional_v2_impl const&) = delete;
     optional_v2_impl& operator=(optional_v2_impl const&) = delete;
+    optional_v2_impl           (optional_v2_impl     &&) = delete;
+    optional_v2_impl& operator=(optional_v2_impl     &&) = delete;
+
 public:
     using contained = Contained;
 
@@ -858,29 +882,33 @@ public:
 
     template <typename...Ts>
     optional_v2_impl(Ts&&...args) noexcept(noexcept(
-        construct(std::forward<Ts>(args)...)
+        emplace(std::forward<Ts>(args)...)
     ))
     {
-        construct(std::forward<Ts>(args)...);
+        emplace(std::forward<Ts>(args)...);
         assert(is_trivially_destructible_without_tombstone || is_tombstoned());
     }
 
+    // Helper function to determine noexcept status.
+    //
     // Didn't want to have a separate "copy" and "move" constructor.  Couldn't
     // use trinary operator without both being evaluated sides being evaluated
-    // and causing problems.  Is this better or worse than seperate construct
+    // and causing problems.  Is this better or worse than seperate emplace
     // functions?
     template <typename...Ts>
-    static constexpr bool construct_noexcept()
+    static constexpr bool emplace_noexcept()
     {
-        if constexpr (is_destructively_movable_same_contained<Ts...>()) {
+        if constexpr (is_type_same_as_derived<Ts...>()) {
             return noexcept(
-                std::declval<Derived>()
-                .construct(emplace<Contained>(std::forward<Ts>(std::declval<Ts>()).object()...)));
+                std::declval<optional_v2>()
+                .emplace(::afh::emplace<Contained>(std::forward<Ts>(std::declval<Ts>()).value()...))
+            );
         }
         else {
             return noexcept(
-                std::declval<Derived>()
-                .construct(emplace<Contained>(std::forward<Ts>(std::declval<Ts>())...)));
+                std::declval<optional_v2>()
+                .emplace(::afh::emplace<Contained>(std::forward<Ts>(std::declval<Ts>())...))
+            );
         }
     }
 
@@ -893,28 +921,35 @@ public:
     //       class explicitly passes a optional_v2 const& or
     //       optional_v2&& respectively.
     template <typename...Ts>
-    Derived* construct(Ts&&...args)
+    optional_v2* emplace(Ts&&...args)
         noexcept(
-            construct_noexcept<Ts...>()
+            emplace_noexcept<Ts...>()
         )
     {
-        if constexpr (is_destructively_movable_same_contained<Ts...>()) {
-            construct(emplace<Contained>(std::forward<Ts>(args).object()...));
+        if constexpr (is_type_same_as_derived<Ts...>()) {
+            // This is basically handling the copy/move case and will expand to
+            // a call that is equivilant to:
+            //
+            //   optional_v2_impl::emplace(emplace_params<Contained, make_lvalue_const_tag, T>(std::forward<T>(arg))
+            //
+            // as if T is an optional_v2<Contained> type and arg is the value
+            // for that type, perfectly forwarding it.
+            emplace(::afh::emplace<Contained>(std::forward<Ts>(args).value()...));
         }
         else {
-            construct(emplace<Contained>(std::forward<Ts>(args)...));
+            emplace(::afh::emplace<Contained>(std::forward<Ts>(args)...));
         }
         assert(is_trivially_destructible_without_tombstone || is_tombstoned());
-        return static_cast<Derived*>(this);
+        return static_cast<optional_v2*>(this);
     }
 
     // Does emplace construction of T
-    // If going to accept derived types, then the size of objects must be the same.
+    // If going to accept derived types, then the size of values must be the same.
     template <typename T, typename const_tag, typename...Ts
         , std::enable_if_t<
             std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
         , int> = 0>
-    Derived* construct(emplace_params<T, const_tag, Ts...>&& emplace) noexcept(noexcept(
+    optional_v2* emplace(emplace_params<T, const_tag, Ts...>&& emplace) noexcept(noexcept(
         emplace.uninitialized_construct(this)
     ))
     {
@@ -927,7 +962,7 @@ public:
             is_tombstoned(true);
         }
         assert(is_trivially_destructible_without_tombstone || is_tombstoned());
-        if constexpr (is_destructively_movable_same_contained<Ts...>())
+        if constexpr (is_type_same_as_derived<Ts...>())
         {
             auto&& value = get<0>(emplace);
             if constexpr (!is_trivially_destructible_without_tombstone && (!std::is_lvalue_reference_v<decltype(value)> && value.has_external_tombstone)) {
@@ -937,7 +972,7 @@ public:
             // Operation was a move on a optional_v2 object.
             assert(is_trivially_destructible_without_tombstone || !value.is_tombstoned());
         }
-        return static_cast<Derived*>(this);
+        return static_cast<optional_v2*>(this);
     }
 
     // Does emplace construction of T.
@@ -946,12 +981,12 @@ public:
     // will be const lvalues, regardless of what they actually were.  This
     // allows for safe reuse of an emplace_params.
     //
-    // If going to accept derived types, then the size of objects must be the same.
+    // If going to accept derived types, then the size of values must be the same.
     template <typename T, typename...Ts
         , std::enable_if_t<
             std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
         , int> = 0>
-    Derived* construct(emplace_params<T, Ts...> const& emplace) noexcept(noexcept(
+    optional_v2* emplace(emplace_params<T, Ts...> const& emplace) noexcept(noexcept(
         emplace.uninitialized_construct(this)
     ))
     {
@@ -961,34 +996,52 @@ public:
             is_tombstoned(true);
         }
         assert(is_trivially_destructible_without_tombstone || is_tombstoned());
-        return static_cast<Derived*>(this);
+        return static_cast<optional_v2*>(this);
     }
 
-    // TODO: Going to have to flip code between destructor and destruct(),
-    //       or into a 3rd fn, otherwise, this will prolly result in UB.
-    ~optional_v2_impl()
+private:
+    void destruct_exempted_members()
     {
-        if constexpr (!is_trivially_destructible_without_tombstone) {
-            if (is_tombstoned()) {
-                object().~Contained();
-            }
-            else {
-                Destruct_tuple_references()(*std::launder(reinterpret_cast<Contained*>(this)));
-            }
+        if (is_tombstoned()) {
+            Destruct_exempt_members()(*std::launder(reinterpret_cast<Contained*>(this)));
+        }
+        else {
+            value().~Contained();
         }
     }
 
-    void destruct()
+public:
+    void reset()
     {
         assert(is_trivially_destructible_without_tombstone || is_tombstoned());
-        this->~optional_v2_impl();
-        if constexpr (!is_trivially_destructible_without_tombstone && has_external_tombstone) {
-            is_tombstoned(false);
+        if constexpr (!is_trivially_destructible_without_tombstone) {
+            destruct_exempted_members();
+            if constexpr (has_external_tombstone) {
+                is_tombstoned(false);
+            }
         }
         assert(is_trivially_destructible_without_tombstone || !is_tombstoned());
     }
 
-    static constexpr bool has_nothing_to_destruct_after_move = Destruct_tuple_references::is_empty;
+    static constexpr bool has_nothing_to_destruct_after_move = Destruct_exempt_members::is_empty;
+
+    // TODO: To be consistent, I should have volatile here.  That's 4
+    //       overloads. :( Although, I could get away with two, since swapping
+    //       a volatile with a non-volatile is prolly not a good idea?
+    void swap(optional_v2& other) noexcept(
+            std::is_nothrow_move_constructible_v<Contained>
+            && std::is_nothrow_swappable_v<Contained>
+        )
+    {
+        using std::swap;
+        if (has_value())
+            if (other.has_value())
+                swap(value(), other.value());
+            else
+                assign(derived(), std::move(other));
+        else if (other.has_value())
+            assign(other, std::move(derived()));
+    }
 
     void has_been_moved() volatile noexcept
     {
@@ -1022,20 +1075,20 @@ private:
     template <typename T, typename U>
     static auto&& assign(T&& lhs, U&& rhs, std::true_type)
         noexcept(
-            noexcept(std::forward<T>(lhs).object() = std::forward<U>(rhs).object())
+            noexcept(std::forward<T>(lhs).value() = std::forward<U>(rhs).value())
         )
     {
         // Only assign something if there is something to assign, or if it's
         // trivially destructable without a tombstone marker.
         if (rhs.is_trivially_destructible_without_tombstone || !rhs.is_tombstoned()) {
             // = (rhs.has_tombstone && rhs.is_tombstoned() || !rhs.trivially_destructable && rhs.is_tombstoned())
-            // Assign the underlying lhs object to the underlying rhs object.
-            // Don't use object().operator=(...) because even if Contained is
+            // Assign the underlying rhs value to the underlying lhs value.
+            // Don't use value().operator=(...) because even if Contained is
             // an object that has an operator=() member function, the compiler
             // seems to get confused.  However, generally, it's limiting the
             // type as types can be assignable, but not have an operator=(...)
             // function, such as primitive types.
-            std::forward<T>(lhs).object() = std::forward<U>(rhs).object();
+            std::forward<T>(lhs).value() = std::forward<U>(rhs).value();
             assert(lhs.is_trivially_destructible_without_tombstone || lhs.is_tombstoned());
             if constexpr (!rhs.is_trivially_destructible_without_tombstone && rhs.has_external_tombstone) {
                 rhs.is_tombstoned(false);
@@ -1043,28 +1096,28 @@ private:
             assert(rhs.is_trivially_destructible_without_tombstone || !rhs.is_tombstoned());
         }
         else if (lhs.is_tombstoned()) {
-            lhs.destruct();
+            lhs.reset();
         }
-        return fwd_like<T>(static_cast<Derived&>(lhs));
+        return fwd_like<T>(static_cast<optional_v2&>(lhs));
     }
 
     // copying non-optional_v2 wrapped reference or lvalue reference type.
     template <typename T, typename U>
     static auto&& assign(T&& lhs, U&& rhs, std::false_type)
         noexcept(
-            noexcept(std::forward<T>(lhs).object() = std::forward<U>(rhs))
-            && noexcept(lhs.construct(std::forward<U>(rhs)))
+            noexcept(std::forward<T>(lhs).value() = std::forward<U>(rhs))
+            && noexcept(lhs.emplace(std::forward<U>(rhs)))
         )
     {
         if (lhs.is_trivially_destructible_without_tombstone || lhs.is_tombstoned()) {
-            // Assign the underlying lhs object to the rhs object.
-            std::forward<T>(lhs).object() = std::forward<U>(rhs);
+            // Assign the underlying lhs value to the rhs value.
+            std::forward<T>(lhs).value() = std::forward<U>(rhs);
         }
         else {
-            lhs.construct(std::forward<U>(rhs));
+            lhs.emplace(std::forward<U>(rhs));
         }
         assert(lhs.is_trivially_destructible_without_tombstone || !is_optional_v2<U>::value || lhs.is_tombstoned());
-        return fwd_like<T>(static_cast<Derived&>(lhs));
+        return fwd_like<T>(static_cast<optional_v2&>(lhs));
     }
 
     // TTA: Allowing assigning any type.  This assumes that
@@ -1082,44 +1135,58 @@ private:
     }
 
 public:
-    template <typename T> auto&& operator=(T&& rhs)          &  { return assign(         (*this), std::forward<T>(rhs)); }
-    template <typename T> auto&& operator=(T&& rhs) volatile &  { return assign(         (*this), std::forward<T>(rhs)); }
+    template <typename T> auto&& operator=(T&& rhs)          &  noexcept(noexcept(assign(         (*this), std::forward<T>(rhs)))) { return assign(         (*this), std::forward<T>(rhs)); }
+    template <typename T> auto&& operator=(T&& rhs) volatile &  noexcept(noexcept(assign(         (*this), std::forward<T>(rhs)))) { return assign(         (*this), std::forward<T>(rhs)); }
 
     // Does it even make sense to assign to a rvalue?  Limited value?
-    template <typename T> auto&& operator=(T&& rhs)          && { return assign(std::move(*this), std::forward<T>(rhs)); }
-    template <typename T> auto&& operator=(T&& rhs) volatile && { return assign(std::move(*this), std::forward<T>(rhs)); }
+    template <typename T> auto&& operator=(T&& rhs)          && noexcept(noexcept(assign(std::move(*this), std::forward<T>(rhs)))) { return assign(std::move(*this), std::forward<T>(rhs)); }
+    template <typename T> auto&& operator=(T&& rhs) volatile && noexcept(noexcept(assign(std::move(*this), std::forward<T>(rhs)))) { return assign(std::move(*this), std::forward<T>(rhs)); }
 
 private:
     void is_tombstoned(bool value)                noexcept {        derived()->is_tombstoned(value); }
     void is_tombstoned(bool value)       volatile noexcept {        derived()->is_tombstoned(value); }
 
 public:
-    bool is_tombstoned(          ) const          noexcept { return derived()->is_tombstoned(); }
-    bool is_tombstoned(          ) const volatile noexcept { return derived()->is_tombstoned(); }
+    bool is_tombstoned(          ) const          noexcept { return  derived()->is_tombstoned(); }
+    bool is_tombstoned(          ) const volatile noexcept { return  derived()->is_tombstoned(); }
 
-    // Access object as lvalue reference
-    auto&& object()                &  noexcept { return object(          *this ); }
-    auto&& object()       volatile &  noexcept { return object(          *this ); }
-    auto&& object() const          &  noexcept { return object(          *this ); }
-    auto&& object() const volatile &  noexcept { return object(          *this ); }
+    // Mimic std::optional::has_value()
+    bool has_value(              ) const          noexcept { return !derived()->is_tombstoned(); }
+    bool has_value(              ) const volatile noexcept { return !derived()->is_tombstoned(); }
 
-    // Access object as rvalue reference
-    auto&& object()                && noexcept { return object(std::move(*this)); }
-    auto&& object()       volatile && noexcept { return object(std::move(*this)); }
-    auto&& object() const          && noexcept { return object(std::move(*this)); }
-    auto&& object() const volatile && noexcept { return object(std::move(*this)); }
+    // Mimic std::optional::operator bool()
+    constexpr explicit operator bool() const noexcept { return has_value(); }
+
+    // Mimic std::optional::value_or
+    template<typename U> auto value_or(U&& default_value) const          &  noexcept { return bool(*this) ? value(          *this ) : static_cast<Contained>(std::forward<U>(default_value)); }
+    template<typename U> auto value_or(U&& default_value) const volatile &  noexcept { return bool(*this) ? value(          *this ) : static_cast<Contained>(std::forward<U>(default_value)); }
+
+    template<typename U> auto value_or(U&& default_value)                && noexcept { return bool(*this) ? value(std::move(*this)) : static_cast<Contained>(std::forward<U>(default_value)); }
+    template<typename U> auto value_or(U&& default_value)       volatile && noexcept { return bool(*this) ? value(std::move(*this)) : static_cast<Contained>(std::forward<U>(default_value)); }
+
+    // Access value as lvalue reference
+    auto&& value()                &  noexcept { return value(          *this ); }
+    auto&& value()       volatile &  noexcept { return value(          *this ); }
+    auto&& value() const          &  noexcept { return value(          *this ); }
+    auto&& value() const volatile &  noexcept { return value(          *this ); }
+
+    // Access value as rvalue reference
+    auto&& value()                && noexcept { return value(std::move(*this)); }
+    auto&& value()       volatile && noexcept { return value(std::move(*this)); }
+    auto&& value() const          && noexcept { return value(std::move(*this)); }
+    auto&& value() const volatile && noexcept { return value(std::move(*this)); }
 
     // Member of operators (TTA: should I use std::addressof instead of &?)
-    auto* operator->()                noexcept { return &object(); }
-    auto* operator->()       volatile noexcept { return &object(); }
-    auto* operator->() const          noexcept { return &object(); }
-    auto* operator->() const volatile noexcept { return &object(); }
+    auto* operator->()                noexcept { return &value(); }
+    auto* operator->()       volatile noexcept { return &value(); }
+    auto* operator->() const          noexcept { return &value(); }
+    auto* operator->() const volatile noexcept { return &value(); }
 
     // Address of operators (TTA: should I use std::addressof instead of &?)
-    auto* operator& ()                noexcept { return &object(); }
-    auto* operator& ()       volatile noexcept { return &object(); }
-    auto* operator& () const          noexcept { return &object(); }
-    auto* operator& () const volatile noexcept { return &object(); }
+    auto* operator& ()                noexcept { return &value(); }
+    auto* operator& ()       volatile noexcept { return &value(); }
+    auto* operator& () const          noexcept { return &value(); }
+    auto* operator& () const volatile noexcept { return &value(); }
 
     // Conversion operators
     //
@@ -1172,7 +1239,7 @@ public:
         explicit operator U convert_to_lrvalue () const_volatile convert_from_lrvalue noexcept  \
         {                                                                                       \
             static_assert(sizeof(U) <= sizeof(Contained), "Cannot upcast to a larger type.");   \
-            return fwd_like<U convert_to_lrvalue>(const_cast<Contained&>(object()));            \
+            return fwd_like<U convert_to_lrvalue>(const_cast<Contained&>(value()));            \
         }
 
 #define CONVERSION_ALL_CVS(        convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
@@ -1199,6 +1266,12 @@ public:
 #undef IS_UPCAST
 #undef IS_DOWNCAST
 };
+
+template <typename Contained, typename X>
+destruct_class<Contained, X>::~destruct_class()
+{
+    static_cast<optional_v2_impl<Contained>*>(this)->destruct_exempted_members();
+}
 
 } // namespace detail
 } // namespace afh
