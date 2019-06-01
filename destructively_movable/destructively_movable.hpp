@@ -622,15 +622,16 @@ constexpr auto destructive_move_exempt(MT C::* mp, Ts...args)
 //     to the moved object (cou-*MicroSoft*-gh! ;)). In this case, resources
 //     will then leak from the moved from object.
 //
-//     To get around this issue, one can define a destruct_exempted_members type trait in the
-//     destructively_movable_traits specialisation for Contained.  This would
-//     have to be implemented for any Contained type that contains types that
-//     have this issue, which is definitely not nice.  This is really a
-//     workaround.  I think that the standard should be rewritten to say
-//     something to the effect that Objects that have been moved, should not
-//     hang on to (or create) *ANY* resources.  Doing so causes problems here
-//     and other places (such as making a move constructor to be not marked
-//     as noexcept because of allocating of memory *cough-cough*).
+//     To get around this issue, one can define a destruct_exempted_members
+//     static const auto type trait in the destructively_movable_traits
+//     specialisation for Contained.  This would have to be implemented for any
+//     Contained type that contains types that have this issue, which is
+//     definitely not nice.  This is really a workaround.  I think that the
+//     standard should be rewritten to say something to the effect that Objects
+//     that have been moved, should not hang on to (or create) *ANY* resources.
+//     Doing so causes problems here and other places (such as making a move
+//     constructor to be not marked as noexcept because of allocating of memory
+//     *cough-cough*).
 template <typename Contained, typename Enabled = void>
 class optional_v2
     : public detail::optional_v2_impl<Contained>
@@ -778,14 +779,23 @@ constexpr bool is_optional_v2_v = is_optional_v2<T>::value;
 namespace detail {
 
 // Helper class for storage
-template <std::size_t Size>
+template <typename Contained, typename = void>
 class storage
 {
-    std::byte m_storage[Size];
+#ifdef WHICH_IS_BETTER
+    std::byte m_storage[sizeof(Contained)];
+#else
+    union {
+        Contained value;
+    };
+public:
+     storage() {}
+    ~storage() {}
+#endif
 };
 
-template <>
-class storage<0>
+template <typename Contained>
+class storage<Contained, std::enable_if_t<std::is_empty_v<Contained>>>
 {
     // Stores nothing.
 };
@@ -809,7 +819,7 @@ class destruct_class<Contained, std::enable_if_t<
 
 template <typename Contained>
 class alignas(Contained) optional_v2_impl
-    : storage<std::is_empty<Contained>::value ? 0 : sizeof(Contained)>
+    : storage<Contained>
     , destruct_class<Contained>
 {
     // So that the destrutor can call optional_v2_impl::destruct_exempted_members()
