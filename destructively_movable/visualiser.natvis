@@ -3,20 +3,20 @@
 
   <!--Would be great if I could specify my own function as intrinsic.--> 
   <!--<Intrinsic Name="is_tombstoned"
-             Expression="afh::detail::destructively_movable_impl&lt;*,*&gt;::is_tombstoned"
+             Expression="afh::detail::optional_v2_impl&lt;*,*&gt;::is_tombstoned"
              ReturnType="bool"
              >
   </Intrinsic>-->
-  <Type Name="afh::detail::destructively_movable_impl&lt;*&gt;">
+  <!--<Type Name="afh::detail::optional_v2_impl&lt;*&gt;">
     <DisplayString>{{is_tombstoned = {is_tombstoned()}, object = {*($T1*)this}}}</DisplayString>
     <Expand>
       <Item Name="is_tombstoned">is_tombstoned()</Item>
       <Item Name="object" Condition="is_tombstoned()">*($T1*)this</Item>
       <Item Name="object" Condition="!is_tombstoned()">"* NOT VALID *"</Item>
     </Expand>
-  </Type>
+  </Type>-->
  
-  <Type Name="afh::destructively_movable&lt;*,void&gt;">
+  <Type Name="afh::optional_v2&lt;*,void&gt;">
     <DisplayString Condition="this->m_isTombstoned">{{{*($T1*)this}}}</DisplayString>
     <DisplayString Condition="!this->m_isTombstoned">{{* NOT VALID *}}</DisplayString>
     <Expand>
@@ -28,13 +28,13 @@
     </Expand>
   </Type>
 
-  <Type Name="afh::detail::destructively_movable_impl&lt;*,afh::destructively_movable&lt;*&gt;&gt;">
-    <DisplayString Condition="((destructively_movable&lt;$T2&gt;*)this)->m_isTombstoned">{{{*($T1*)((destructively_movable&lt;$T2&gt;*)this)}}}</DisplayString>
-    <DisplayString Condition="!((destructively_movable&lt;$T2&gt;*)this)->m_isTombstoned">{{* NOT VALID *}}</DisplayString>
+  <Type Name="afh::detail::optional_v2_impl&lt;*&gt;">
+    <DisplayString Condition="((afh::detail::optional_v2_impl&lt;$T1&gt;::optional_v2*)this)->m_isTombstoned">{{{*($T1*)((afh::detail::optional_v2_impl&lt;$T1&gt;::optional_v2*)this)}}}</DisplayString>
+    <DisplayString Condition="!((afh::detail::optional_v2_impl&lt;$T1&gt;::optional_v2*)this)->m_isTombstoned">{{* NOT VALID *}}</DisplayString>
     <Expand>
-      <Item Name="is_tombstoned">((destructively_movable&lt;$T2&gt;*)this)->m_isTombstoned</Item>
-      <Item Name="object" Condition="((destructively_movable&lt;$T2&gt;*)this)->m_isTombstoned">*($T1*)((destructively_movable&lt;$T2&gt;*)this)</Item>
-      <Synthetic Name="object" Condition="!((destructively_movable&lt;$T2&gt;*)this)->m_isTombstoned">
+      <Item Name="is_tombstoned">((afh::detail::optional_v2_impl&lt;$T1&gt;::optional_v2*)this)->m_isTombstoned</Item>
+      <Item Name="object" Condition="((afh::detail::optional_v2_impl&lt;$T1&gt;::optional_v2*)this)->m_isTombstoned">*($T1*)((afh::detail::optional_v2_impl&lt;$T1&gt;::optional_v2*)this)</Item>
+      <Synthetic Name="object" Condition="!((afh::detail::optional_v2_impl&lt;$T1&gt;::optional_v2*)this)->m_isTombstoned">
         <DisplayString>* NOT VALID *</DisplayString>
       </Synthetic>
     </Expand>
