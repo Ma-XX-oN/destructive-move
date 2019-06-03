@@ -136,8 +136,8 @@ int main()
     static_cast<X       volatile & >(x).test();
     static_cast<X const          & >(x).test();
     static_cast<X const volatile & >(x).test();
-    x.destruct();
-    x.construct(afh::emplace<X>());
+    x.reset();
+    x.emplace(afh::emplace<X>());
 
     std::cout << "\n--] rvalues [----------\n";
     static_cast<X                &&>(x).test();
