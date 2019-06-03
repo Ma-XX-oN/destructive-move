@@ -4,7 +4,11 @@
 
 This library is in responce to the question in [CppCon Grill the Committee](https://youtu.be/cH0nJPbMFAY?t=1263) about having destructive moves added to C++.  I thought that it was an interesting problem, and wondered if a library solution could be made.  So I made this "toy" container to flesh out the possibility and, with the advent of *C++17*, it worked out quite well.
 
-`destructively_movable` is a template container that allows the "dropping on the floor" of an object husk after its contents has been moved to another location.  This means that the destructor for that object is never called which, if it contains many objects, can result in significant performance improvements.  This is still in some development and testing stage, but is in a point where it does work and where I feel can be shown to the community for feedback.
+`destructively_movable` is a template container that allows the "dropping on the floor" of an object husk after its contents has been moved to another location.  This means that the destructor for that object is never called which, if it contains many objects, can result in significant performance improvements depending on types of compiler optimisations that are performed.
+
+NOTE: This is still in some development and testing stage, but is in a point where it does work and where I feel can be shown to the community for feedback.
+
+There has been a couple of articles that I found stated by Sean Parent on this subject.  One called [Reply to Twitter Conversation on Move](https://github.com/sean-parent/sean-parent.github.io/wiki/Reply-to-Twitter-Conversation-on-Move) and another called [Move](https://sean-parent.stlab.cc/2014/05/30/about-move.html).  I think the second is a more formalisim of the first, so I'm guessing that that is the order that they occured, though I could be wrong.  In any case, I think what is missing from this idea, is the ability to interrogate the space where the object could reside, to see if an object actually exists there.  If we could do that, then problems of holes in containers which aren't directly controlled by the compiler, can be queried, allowing an appropriate response to be made, but yet still allow elide
 
 ## Description
 
