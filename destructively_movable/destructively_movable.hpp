@@ -26,7 +26,7 @@ template<typename T, typename const_tag, typename...Ts>
 struct emplace_params;
 
 template <std::size_t I, typename...Ts>
-auto&& get(emplace_params<Ts...>& params);
+constexpr auto&& get(emplace_params<Ts...>& params);
 
 struct make_lvalue_const_tag {};
 struct make_rvalue_copy_lvalue_const_tag {};
@@ -45,13 +45,13 @@ template<typename T, typename const_tag, typename...Ts>
 struct emplace_params
 {
     template <std::size_t I, typename...Us>
-    friend auto&& get(emplace_params<Us...>& params);
+    friend constexpr auto&& get(emplace_params<Us...>& params);
 
-    emplace_params(Ts&&...args)
+    constexpr emplace_params(Ts&&...args)
         : ref_storage(std::forward<Ts>(args)...)
     {}
 
-    auto* uninitialized_construct(void* storage)
+    constexpr auto* uninitialized_construct(void* storage)
         noexcept(noexcept(T(std::forward<Ts>(std::declval<Ts>())...)))
     {
         return std::apply([storage](auto &&... args) {
@@ -60,14 +60,14 @@ struct emplace_params
     }
 
     // If "this" is const, then pass the parameters as const lvalue references.
-    auto* uninitialized_construct(void* storage) const
+    constexpr auto* uninitialized_construct(void* storage) const
         noexcept(noexcept(uninitialized_construct(storage, const_tag{})))
     {
         return uninitialized_construct(storage, const_tag{});
     }
 
 private:
-    auto* uninitialized_construct(void* storage, make_lvalue_const_tag) const
+    constexpr auto* uninitialized_construct(void* storage, make_lvalue_const_tag) const
         noexcept(noexcept(T(afh::rvalue_copy_or_lvalue_const<Ts>(std::declval<Ts>())...)))
     {
         return std::apply([storage](auto &&... args) {
@@ -75,7 +75,7 @@ private:
             }, ref_storage);
     }
 
-    auto* uninitialized_construct(void* storage, make_rvalue_copy_lvalue_const_tag) const
+    constexpr auto* uninitialized_construct(void* storage, make_rvalue_copy_lvalue_const_tag) const
         noexcept(noexcept(T(static_cast<to_const_lvalue<Ts>>(std::declval<Ts>())...)))
     {
         return std::apply([storage](auto &&... args) {
@@ -118,7 +118,7 @@ private:
 //  If nither of these options sound good, then consider constructing them on
 //  the fly.
 template <typename T, typename const_tag = make_lvalue_const_tag, typename...Ts>
-auto emplace(Ts&& ...args)
+constexpr auto emplace(Ts&& ...args)
 {
     return emplace_params<T, const_tag, Ts...>(std::forward<Ts>(args)...);
 }
@@ -131,7 +131,7 @@ auto emplace(Ts&& ...args)
 //  function doesn't care what the types are, it just puts them all into a
 //  parameter pack.
 template <std::size_t I, typename...Ts>
-auto&& get(emplace_params<Ts...>& params)
+constexpr auto&& get(emplace_params<Ts...>& params)
 {
     return std::forward<std::tuple_element_t<I, std::tuple<Ts...>>>(std::get<I>(params.ref_storage));
 }
@@ -232,7 +232,7 @@ struct destructively_movable_traits
 //-----------------------------------------------------------------------------
 namespace detail {
     template <typename T>
-    void destruct(T& obj) noexcept(noexcept(obj.~T()))
+    constexpr void destruct(T& obj) noexcept(noexcept(obj.~T()))
     {
         obj.~T();
     }
@@ -241,7 +241,7 @@ namespace detail {
     struct Destruct_item {
         T& obj;
         template<typename T_>
-        void operator()(T_&& member) noexcept(noexcept(destruct(obj.*member))) {
+        constexpr void operator()(T_&& member) noexcept(noexcept(destruct(obj.*member))) {
             destruct(obj.*member);
         }
     };
@@ -251,7 +251,7 @@ namespace detail {
 
     template <typename T, typename Take_from>
     struct Destruct_exempt_members {
-        void operator()(T& obj) noexcept(noexcept(for_each(Take_from::destructive_move_exempt, Destruct_item{ obj }))) {
+        constexpr void operator()(T& obj) noexcept(noexcept(for_each(Take_from::destructive_move_exempt, Destruct_item{ obj }))) {
             // clang++ is having issues with the noexcept clause for lambdas
             // causing it to crash.  Works fine for a functor.
             //auto fn = [&obj](auto&& object) noexcept(noexcept(destruct(obj.*object))) {
@@ -278,7 +278,7 @@ namespace detail {
     // default - do nothing
     template <typename T, typename = void>
     struct get_destruct_exempt_members {
-        void operator()(T& obj) noexcept {
+        constexpr void operator()(T& obj) noexcept {
         }
 
         static constexpr bool is_empty = true;
@@ -647,24 +647,24 @@ public:
     //       instantiate the base class directly, or explicitly call the
     //       assignment operator, if they existed.  However they've been
     //       deleted those anyway if someone were so inclided.
-    optional_v2(optional_v2     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
-    optional_v2(optional_v2 const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
+    constexpr optional_v2(optional_v2     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
+    constexpr optional_v2(optional_v2 const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
 
-    optional_v2&  operator=(optional_v2     && obj)          &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
-    optional_v2&  operator=(optional_v2 const& obj)          &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
-    optional_v2&  operator=(optional_v2     && obj) volatile &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
-    optional_v2&  operator=(optional_v2 const& obj) volatile &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    constexpr optional_v2&  operator=(optional_v2     && obj)          &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    constexpr optional_v2&  operator=(optional_v2 const& obj)          &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    constexpr optional_v2&  operator=(optional_v2     && obj) volatile &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    constexpr optional_v2&  operator=(optional_v2 const& obj) volatile &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
 
     // Does it even make sense to assign to a rvalue?  Limited value?
-    optional_v2&& operator=(optional_v2     && obj)          && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
-    optional_v2&& operator=(optional_v2 const& obj)          && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
-    optional_v2&& operator=(optional_v2     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
-    optional_v2&& operator=(optional_v2 const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    constexpr optional_v2&& operator=(optional_v2     && obj)          && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    constexpr optional_v2&& operator=(optional_v2 const& obj)          && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    constexpr optional_v2&& operator=(optional_v2     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    constexpr optional_v2&& operator=(optional_v2 const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
 
-    void is_tombstoned(bool value)                noexcept { assert(value);        Tombstone_functions(*this, tombstone_tag()); }
-    void is_tombstoned(bool value)       volatile noexcept { assert(value);        Tombstone_functions(*this, tombstone_tag()); }
-    bool is_tombstoned(          ) const          noexcept {                return Tombstone_functions(*this); }
-    bool is_tombstoned(          ) const volatile noexcept {                return Tombstone_functions(*this); }
+    constexpr void is_tombstoned(bool value)                noexcept { assert(value);        Tombstone_functions(*this, tombstone_tag()); }
+    constexpr void is_tombstoned(bool value)       volatile noexcept { assert(value);        Tombstone_functions(*this, tombstone_tag()); }
+    constexpr bool is_tombstoned(          ) const          noexcept {                return Tombstone_functions(*this); }
+    constexpr bool is_tombstoned(          ) const volatile noexcept {                return Tombstone_functions(*this); }
 
     using base::base;
 };
@@ -694,24 +694,24 @@ public:
     //       instantiate the base class directly, or explicitly call the
     //       assignment operator, if they existed.  However they've been
     //       deleted those anyway if someone were so inclided.
-    optional_v2(optional_v2     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
-    optional_v2(optional_v2 const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
+    constexpr optional_v2(optional_v2     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
+    constexpr optional_v2(optional_v2 const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
 
-    optional_v2&  operator=(optional_v2 const& obj)          &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
-    optional_v2&  operator=(optional_v2     && obj)          &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
-    optional_v2&  operator=(optional_v2 const& obj) volatile &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
-    optional_v2&  operator=(optional_v2     && obj) volatile &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    constexpr optional_v2&  operator=(optional_v2 const& obj)          &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    constexpr optional_v2&  operator=(optional_v2     && obj)          &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    constexpr optional_v2&  operator=(optional_v2 const& obj) volatile &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    constexpr optional_v2&  operator=(optional_v2     && obj) volatile &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
 
     // Does it even make sense to assign to a rvalue?  Limited value?
-    optional_v2&& operator=(optional_v2 const& obj)          && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
-    optional_v2&& operator=(optional_v2     && obj)          && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
-    optional_v2&& operator=(optional_v2 const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
-    optional_v2&& operator=(optional_v2     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    constexpr optional_v2&& operator=(optional_v2 const& obj)          && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    constexpr optional_v2&& operator=(optional_v2     && obj)          && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    constexpr optional_v2&& operator=(optional_v2 const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    constexpr optional_v2&& operator=(optional_v2     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
 
-    void is_tombstoned(bool value)                noexcept {               }
-    void is_tombstoned(bool value)       volatile noexcept {               }
-    bool is_tombstoned(          ) const          noexcept { return false; }
-    bool is_tombstoned(          ) const volatile noexcept { return false; }
+    constexpr void is_tombstoned(bool value)                noexcept {               }
+    constexpr void is_tombstoned(bool value)       volatile noexcept {               }
+    constexpr bool is_tombstoned(          ) const          noexcept { return false; }
+    constexpr bool is_tombstoned(          ) const volatile noexcept { return false; }
 
     using base::base;
 };
@@ -742,24 +742,24 @@ public:
     //       instantiate the base class directly, or explicitly call the
     //       assignment operator, if they existed.  However they've been
     //       deleted those anyway if someone were so inclided.
-    optional_v2(optional_v2     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
-    optional_v2(optional_v2 const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
+    constexpr optional_v2(optional_v2     && obj) noexcept(noexcept(base(std::move(obj)))) : base(std::move(obj)) {}
+    constexpr optional_v2(optional_v2 const& obj) noexcept(noexcept(base(          obj ))) : base(          obj ) {}
 
-    optional_v2&  operator=(optional_v2 const& obj)          &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
-    optional_v2&  operator=(optional_v2     && obj)          &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
-    optional_v2&  operator=(optional_v2 const& obj) volatile &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
-    optional_v2&  operator=(optional_v2     && obj) volatile &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    constexpr optional_v2&  operator=(optional_v2 const& obj)          &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    constexpr optional_v2&  operator=(optional_v2     && obj)          &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
+    constexpr optional_v2&  operator=(optional_v2 const& obj) volatile &  noexcept(noexcept(                 base::operator=(          obj ))) { return                  base::operator=(          obj ); }
+    constexpr optional_v2&  operator=(optional_v2     && obj) volatile &  noexcept(noexcept(                 base::operator=(std::move(obj)))) { return                  base::operator=(std::move(obj)); }
 
     // Does it even make sense to assign to a rvalue?  Limited value?
-    optional_v2&& operator=(optional_v2 const& obj)          && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
-    optional_v2&& operator=(optional_v2     && obj)          && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
-    optional_v2&& operator=(optional_v2 const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
-    optional_v2&& operator=(optional_v2     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    constexpr optional_v2&& operator=(optional_v2 const& obj)          && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    constexpr optional_v2&& operator=(optional_v2     && obj)          && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
+    constexpr optional_v2&& operator=(optional_v2 const& obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(          obj ))) { return std::move(*this).base::operator=(          obj ); }
+    constexpr optional_v2&& operator=(optional_v2     && obj) volatile && noexcept(noexcept(std::move(*this).base::operator=(std::move(obj)))) { return std::move(*this).base::operator=(std::move(obj)); }
 
-    void is_tombstoned(bool value)                noexcept {        m_isTombstoned = value; }
-    void is_tombstoned(bool value)       volatile noexcept {        m_isTombstoned = value; }
-    bool is_tombstoned(          ) const          noexcept { return m_isTombstoned; }
-    bool is_tombstoned(          ) const volatile noexcept { return m_isTombstoned; }
+    constexpr void is_tombstoned(bool value)                noexcept {        m_isTombstoned = value; }
+    constexpr void is_tombstoned(bool value)       volatile noexcept {        m_isTombstoned = value; }
+    constexpr bool is_tombstoned(          ) const          noexcept { return m_isTombstoned; }
+    constexpr bool is_tombstoned(          ) const volatile noexcept { return m_isTombstoned; }
 
     using base::base;
 };
@@ -787,7 +787,7 @@ protected:
         Contained value;
     };
     // Have to have ctor/dtor if Contained is not a trivial type
-    storage()  {}
+    constexpr storage()  {}
     ~storage() {}
 };
 
@@ -798,7 +798,7 @@ protected:
     union {
         Contained value;
     };
-    storage()  {}
+    constexpr storage()  {}
 };
 
 template <typename Contained>
@@ -858,10 +858,10 @@ class alignas(Contained) optional_v2_impl
     static constexpr bool has_internal_tombstone = !std::is_void_v<optional_v2_tombstone_functions<Contained>>;
     using Destruct_exempt_members = optional_v2_destruct<Contained>;
 
-    optional_v2                * derived()                noexcept { return static_cast<optional_v2                *>(this); }
-    optional_v2       volatile * derived()       volatile noexcept { return static_cast<optional_v2       volatile *>(this); }
-    optional_v2 const          * derived() const          noexcept { return static_cast<optional_v2 const          *>(this); }
-    optional_v2 const volatile * derived() const volatile noexcept { return static_cast<optional_v2 const volatile *>(this); }
+    constexpr optional_v2                * derived()                noexcept { return static_cast<optional_v2                *>(this); }
+    constexpr optional_v2       volatile * derived()       volatile noexcept { return static_cast<optional_v2       volatile *>(this); }
+    constexpr optional_v2 const          * derived() const          noexcept { return static_cast<optional_v2 const          *>(this); }
+    constexpr optional_v2 const volatile * derived() const volatile noexcept { return static_cast<optional_v2 const volatile *>(this); }
 
     static constexpr bool is_trivially_destructible_without_internal_tombstone
         = !has_internal_tombstone && std::is_trivially_destructible_v<Contained>;
@@ -886,7 +886,7 @@ class alignas(Contained) optional_v2_impl
 
     static constexpr bool has_external_tombstone = std::is_same<optional_v2, ::afh::optional_v2<Contained, void>>::value;
 
-    template <typename T> struct bare_type_impl                           { using type = T; };
+    template <typename T> struct bare_type_impl                        { using type = T; };
     template <typename T> struct bare_type_impl<::afh::optional_v2<T>> { using type = T; };
 
     // Strips and extract the wrapped type or if not wrapped, just return the type.
@@ -903,7 +903,7 @@ class alignas(Contained) optional_v2_impl
 public:
     using contained = Contained;
 
-    optional_v2_impl(tombstone_tag) noexcept {
+    constexpr optional_v2_impl(tombstone_tag) noexcept {
         if constexpr (!is_trivially_destructible_without_internal_tombstone) {
             is_tombstoned(true);
         }
@@ -911,7 +911,7 @@ public:
     }
 
     template <typename...Ts>
-    optional_v2_impl(Ts&&...args) noexcept(noexcept(
+    constexpr optional_v2_impl(Ts&&...args) noexcept(noexcept(
         emplace(std::forward<Ts>(args)...)
     ))
     {
@@ -922,7 +922,7 @@ public:
     // Does emplace construction of Contained, excluding "move/copy
     // construction".
     template <typename...Ts>
-    optional_v2* emplace(Ts&&...args)
+    constexpr optional_v2* emplace(Ts&&...args)
         noexcept(
             noexcept(
                 emplace(::afh::emplace<Contained>(std::forward<Ts>(std::declval<Ts>())...))
@@ -941,7 +941,7 @@ public:
     //       optional_v2_impl&& directly anyway, since the derived
     //       class explicitly passes a optional_v2 const& or
     //       optional_v2&& respectively.
-    optional_v2* emplace(optional_v2&& to_be_moved)
+    constexpr optional_v2* emplace(optional_v2&& to_be_moved)
         noexcept(
             noexcept(
                 emplace(::afh::emplace<Contained>(std::move(to_be_moved).value()))
@@ -965,7 +965,7 @@ public:
     //       optional_v2_impl&& directly anyway, since the derived
     //       class explicitly passes a optional_v2 const& or
     //       optional_v2&& respectively.
-    optional_v2* emplace(optional_v2 const& to_be_copied)
+    constexpr optional_v2* emplace(optional_v2 const& to_be_copied)
         noexcept(
             noexcept(
                 emplace(::afh::emplace<Contained>(to_be_copied.value()))
@@ -988,7 +988,7 @@ public:
         , std::enable_if_t<
             std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
         , int> = 0>
-    optional_v2* emplace(emplace_params<T, const_tag, Ts...>&& emplace) noexcept(noexcept(
+    constexpr optional_v2* emplace(emplace_params<T, const_tag, Ts...>&& emplace) noexcept(noexcept(
         emplace.uninitialized_construct(this)
     ))
     {
@@ -1018,7 +1018,7 @@ public:
         , std::enable_if_t<
             std::is_base_of<Contained, T>::value && sizeof(Contained) == sizeof(T)
         , int> = 0>
-    optional_v2* emplace(emplace_params<T, const_tag, Ts...> const& emplace) noexcept(noexcept(
+    constexpr optional_v2* emplace(emplace_params<T, const_tag, Ts...> const& emplace) noexcept(noexcept(
         emplace.uninitialized_construct(this)
     ))
     {
@@ -1032,7 +1032,7 @@ public:
     }
 
 private:
-    void destruct_exempted_members()
+    constexpr void destruct_exempted_members()
     {
         if (is_tombstoned()) {
             if constexpr (std::is_empty_v<Contained>)
@@ -1046,7 +1046,7 @@ private:
     }
 
 public:
-    void reset()
+    constexpr void reset()
     {
         assert(is_trivially_destructible_without_internal_tombstone || !is_tombstoned());
         if constexpr (!is_trivially_destructible_without_internal_tombstone) {
@@ -1063,7 +1063,7 @@ public:
 
     // Swapping is only allowed between two non-cv qualified values, or 2
     // volatile qualified values.
-    void swap(optional_v2& other) noexcept(
+    constexpr void swap(optional_v2& other) noexcept(
             std::is_nothrow_move_constructible_v<Contained>
             && std::is_nothrow_swappable_v<Contained>
         )
@@ -1080,7 +1080,7 @@ public:
 
     // Swapping is only allowed between two non-cv qualified values, or 2
     // volatile qualified values.
-    void swap(optional_v2 volatile& other) volatile noexcept(
+    constexpr void swap(optional_v2 volatile& other) volatile noexcept(
         std::is_nothrow_move_constructible_v<Contained>
         && std::is_nothrow_swappable_v<Contained>
         )
@@ -1095,7 +1095,7 @@ public:
             assign(other, std::move(derived()));
     }
 
-    void has_been_moved() volatile noexcept
+    constexpr void has_been_moved() volatile noexcept
     {
         assert(is_trivially_destructible_without_internal_tombstone || 
             (   has_external_tombstone && !is_tombstoned()
@@ -1106,7 +1106,7 @@ public:
         assert(is_trivially_destructible_without_internal_tombstone || is_tombstoned());
     }
 
-    void has_been_moved()          noexcept
+    constexpr void has_been_moved()          noexcept
     {
         assert(is_trivially_destructible_without_internal_tombstone ||
             (   has_external_tombstone && !is_tombstoned()
@@ -1122,7 +1122,7 @@ private:
     using assigning_copy     = std::false_type;
     // moving optional_v2 rvalue referenced wrapped type.
     template <typename T, typename U>
-    static auto&& assign(T&& lhs, U&& rhs, moving_optional_v2)
+    static constexpr auto&& assign(T&& lhs, U&& rhs, moving_optional_v2)
         noexcept(
             noexcept(std::forward<T>(lhs).value() = std::forward<U>(rhs).value())
         )
@@ -1152,7 +1152,7 @@ private:
 
     // copying non-optional_v2 wrapped reference or lvalue reference type.
     template <typename T, typename U>
-    static auto&& assign(T&& lhs, U&& rhs, assigning_copy)
+    static constexpr auto&& assign(T&& lhs, U&& rhs, assigning_copy)
         noexcept(
             noexcept(std::forward<T>(lhs).value() = std::forward<U>(rhs))
             && noexcept(lhs.emplace(std::forward<U>(rhs)))
@@ -1175,7 +1175,7 @@ private:
     //      convertable to such a type.  But what if it is overloaded on
     //      more?  May have to take a second look at above assign() functions.
     template <typename T, typename U>
-    static auto&& assign(T&& lhs, U&& rhs)
+    static constexpr auto&& assign(T&& lhs, U&& rhs)
         noexcept(noexcept(
             assign(std::forward<T>(lhs), std::forward<U>(rhs), is_optional_v2_t<U>{})
         ))
@@ -1184,58 +1184,58 @@ private:
     }
 
 public:
-    template <typename T> auto&& operator=(T&& rhs)          &  noexcept(noexcept(assign(         (*this), std::forward<T>(rhs)))) { return assign(         (*this), std::forward<T>(rhs)); }
-    template <typename T> auto&& operator=(T&& rhs) volatile &  noexcept(noexcept(assign(         (*this), std::forward<T>(rhs)))) { return assign(         (*this), std::forward<T>(rhs)); }
+    template <typename T> constexpr auto&& operator=(T&& rhs)          &  noexcept(noexcept(assign(         (*this), std::forward<T>(rhs)))) { return assign(         (*this), std::forward<T>(rhs)); }
+    template <typename T> constexpr auto&& operator=(T&& rhs) volatile &  noexcept(noexcept(assign(         (*this), std::forward<T>(rhs)))) { return assign(         (*this), std::forward<T>(rhs)); }
 
     // Does it even make sense to assign to a rvalue?  Limited value?
-    template <typename T> auto&& operator=(T&& rhs)          && noexcept(noexcept(assign(std::move(*this), std::forward<T>(rhs)))) { return assign(std::move(*this), std::forward<T>(rhs)); }
-    template <typename T> auto&& operator=(T&& rhs) volatile && noexcept(noexcept(assign(std::move(*this), std::forward<T>(rhs)))) { return assign(std::move(*this), std::forward<T>(rhs)); }
+    template <typename T> constexpr auto&& operator=(T&& rhs)          && noexcept(noexcept(assign(std::move(*this), std::forward<T>(rhs)))) { return assign(std::move(*this), std::forward<T>(rhs)); }
+    template <typename T> constexpr auto&& operator=(T&& rhs) volatile && noexcept(noexcept(assign(std::move(*this), std::forward<T>(rhs)))) { return assign(std::move(*this), std::forward<T>(rhs)); }
 
 private:
-    void is_tombstoned(bool value)                noexcept {        derived()->is_tombstoned(value); }
-    void is_tombstoned(bool value)       volatile noexcept {        derived()->is_tombstoned(value); }
+    constexpr void is_tombstoned(bool value)                noexcept {        derived()->is_tombstoned(value); }
+    constexpr void is_tombstoned(bool value)       volatile noexcept {        derived()->is_tombstoned(value); }
 
 public:
-    bool is_tombstoned(          ) const          noexcept { return  derived()->is_tombstoned(); }
-    bool is_tombstoned(          ) const volatile noexcept { return  derived()->is_tombstoned(); }
+    constexpr bool is_tombstoned(          ) const          noexcept { return  derived()->is_tombstoned(); }
+    constexpr bool is_tombstoned(          ) const volatile noexcept { return  derived()->is_tombstoned(); }
 
     // Mimic std::optional::has_value()
-    bool has_value(              ) const          noexcept { return !derived()->is_tombstoned(); }
-    bool has_value(              ) const volatile noexcept { return !derived()->is_tombstoned(); }
+    constexpr bool has_value(              ) const          noexcept { return !derived()->is_tombstoned(); }
+    constexpr bool has_value(              ) const volatile noexcept { return !derived()->is_tombstoned(); }
 
     // Mimic std::optional::operator bool()
     constexpr explicit operator bool() const noexcept { return has_value(); }
 
     // Mimic std::optional::value_or
-    template<typename U> auto value_or(U&& default_value) const          &  noexcept { return bool(*this) ? value(          *this ) : static_cast<Contained>(std::forward<U>(default_value)); }
-    template<typename U> auto value_or(U&& default_value) const volatile &  noexcept { return bool(*this) ? value(          *this ) : static_cast<Contained>(std::forward<U>(default_value)); }
+    template<typename U> constexpr auto value_or(U&& default_value) const          &  noexcept { return bool(*this) ? value(          *this ) : static_cast<Contained>(std::forward<U>(default_value)); }
+    template<typename U> constexpr auto value_or(U&& default_value) const volatile &  noexcept { return bool(*this) ? value(          *this ) : static_cast<Contained>(std::forward<U>(default_value)); }
 
-    template<typename U> auto value_or(U&& default_value)                && noexcept { return bool(*this) ? value(std::move(*this)) : static_cast<Contained>(std::forward<U>(default_value)); }
-    template<typename U> auto value_or(U&& default_value)       volatile && noexcept { return bool(*this) ? value(std::move(*this)) : static_cast<Contained>(std::forward<U>(default_value)); }
+    template<typename U> constexpr auto value_or(U&& default_value)                && noexcept { return bool(*this) ? value(std::move(*this)) : static_cast<Contained>(std::forward<U>(default_value)); }
+    template<typename U> constexpr auto value_or(U&& default_value)       volatile && noexcept { return bool(*this) ? value(std::move(*this)) : static_cast<Contained>(std::forward<U>(default_value)); }
 
     // Access value as lvalue reference
-    auto&& value()                &  noexcept { return value(          *this ); }
-    auto&& value()       volatile &  noexcept { return value(          *this ); }
-    auto&& value() const          &  noexcept { return value(          *this ); }
-    auto&& value() const volatile &  noexcept { return value(          *this ); }
+    constexpr auto&& value()                &  noexcept { return value(          *this ); }
+    constexpr auto&& value()       volatile &  noexcept { return value(          *this ); }
+    constexpr auto&& value() const          &  noexcept { return value(          *this ); }
+    constexpr auto&& value() const volatile &  noexcept { return value(          *this ); }
 
     // Access value as rvalue reference
-    auto&& value()                && noexcept { return value(std::move(*this)); }
-    auto&& value()       volatile && noexcept { return value(std::move(*this)); }
-    auto&& value() const          && noexcept { return value(std::move(*this)); }
-    auto&& value() const volatile && noexcept { return value(std::move(*this)); }
+    constexpr auto&& value()                && noexcept { return value(std::move(*this)); }
+    constexpr auto&& value()       volatile && noexcept { return value(std::move(*this)); }
+    constexpr auto&& value() const          && noexcept { return value(std::move(*this)); }
+    constexpr auto&& value() const volatile && noexcept { return value(std::move(*this)); }
 
     // Member of operators (TTA: should I use std::addressof instead of &?)
-    auto* operator->()                noexcept { return &value(); }
-    auto* operator->()       volatile noexcept { return &value(); }
-    auto* operator->() const          noexcept { return &value(); }
-    auto* operator->() const volatile noexcept { return &value(); }
+    constexpr auto* operator->()                noexcept { return &value(); }
+    constexpr auto* operator->()       volatile noexcept { return &value(); }
+    constexpr auto* operator->() const          noexcept { return &value(); }
+    constexpr auto* operator->() const volatile noexcept { return &value(); }
 
     // Address of operators (TTA: should I use std::addressof instead of &?)
-    auto* operator& ()                noexcept { return &value(); }
-    auto* operator& ()       volatile noexcept { return &value(); }
-    auto* operator& () const          noexcept { return &value(); }
-    auto* operator& () const volatile noexcept { return &value(); }
+    constexpr auto* operator& ()                noexcept { return &value(); }
+    constexpr auto* operator& ()       volatile noexcept { return &value(); }
+    constexpr auto* operator& () const          noexcept { return &value(); }
+    constexpr auto* operator& () const volatile noexcept { return &value(); }
 
     // Conversion operators
     //
@@ -1285,7 +1285,7 @@ public:
 
 #define CONVERSION(const_volatile, convert_to_lrvalue, convert_from_lrvalue, enabler, explicit) \
         template <typename U, std::enable_if_t<enabler(const_volatile), int> = 0>               \
-        explicit operator U convert_to_lrvalue () const_volatile convert_from_lrvalue noexcept  \
+        constexpr explicit operator U convert_to_lrvalue () const_volatile convert_from_lrvalue noexcept \
         {                                                                                       \
             static_assert(sizeof(U) <= sizeof(Contained), "Cannot upcast to a larger type.");   \
             return fwd_like<U convert_to_lrvalue>(const_cast<Contained&>(value()));            \

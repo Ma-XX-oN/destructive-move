@@ -18,6 +18,7 @@
 #include <type_traits>
 #include <tuple>
 #include <cwchar>
+#include <iostream>
 
 #ifdef _MSC_VER
 # define AFH___FUNCSIG __FUNCSIG__
@@ -240,7 +241,7 @@ constexpr T rvalue_copy_or_lvalue_const(std::remove_reference_t<T>&& x) noexcept
 //=============================================================================
 namespace detail {
     template <typename...Ts, typename Body, std::size_t...I>
-    void for_each_impl(std::tuple<Ts...> const& tuple, Body& body, std::index_sequence<I...>)
+    constexpr void for_each_impl(std::tuple<Ts...> const& tuple, Body& body, std::index_sequence<I...>)
         noexcept(noexcept((body(std::get<I>(tuple)), ...)))
     {
         (body(std::get<I>(tuple)), ...);
@@ -252,7 +253,7 @@ namespace detail {
 //
 //  Iterate over each tuple element.
 template <typename...Ts, typename Body>
-void for_each(std::tuple<Ts...> const& tuple, Body&& body)
+constexpr void for_each(std::tuple<Ts...> const& tuple, Body&& body)
     noexcept(noexcept(detail::for_each_impl(tuple, body, std::make_index_sequence<sizeof...(Ts)>{})))
 {
     detail::for_each_impl(tuple, body, std::make_index_sequence<sizeof...(Ts)>{});
